@@ -1,0 +1,44 @@
+[tool.poetry]
+name = 'folx'
+version = '0.1'
+description = 'forward mode laplacian for jax'
+authors = [
+    "Nicholas Gao <ngao@tum.de>",
+    "Jonas Koehler <jonas.koehler@microsoft.com>",
+    "Adam Foster <adam.e.foster@microsoft.com>"
+]
+maintainers = [
+    "Nicholas Gao <ngao@tum.de>",
+    "Jonas Koehler <jonas.koehler@microsoft.com>"
+]
+license = 'MIT'
+readme = 'README.md'
+homepage = 'https://github.com/microsoft/folx'
+repository = 'https://github.com/microsoft/folx'
+keywords = ["jax", "laplacian", "numeric"]
+classifiers = [
+    'Development Status :: 4 - Beta',
+    'Environment :: Console',
+    'Environment :: GPU :: NVIDIA CUDA',
+    'Intended Audience :: Science/Research',
+    'Operating System :: MacOS :: MacOS X',
+    'Operating System :: POSIX :: Linux',
+    'Topic :: Scientific/Engineering :: Artificial Intelligence',
+    'Topic :: Scientific/Engineering :: Chemistry',
+    'Topic :: Scientific/Engineering :: Physics',
+    'Programming Language :: Python :: 3.10',
+    'Programming Language :: Python :: 3.11'
+]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<4.0"
+jax = "*"
+jaxlib = "*"
+jax-dataclasses = "*"
+jaxtyping = "*"
+numpy = "*"
+pytest = "*"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

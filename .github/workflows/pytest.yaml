@@ -1,0 +1,30 @@
+name: PyTest
+on: push
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v2
+      - name: Switch to Current Branch
+        run: git checkout ${{ env.BRANCH }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: | 
+          python -m pip install --upgrade pip setuptools wheel 
+      - name: Install package
+        run: |
+          python -m pip install -e .
+      - name: Run tests
+        run: |
+          python -m pip install pytest
+          pytest test
