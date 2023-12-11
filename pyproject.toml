@@ -1,24 +1,20 @@
-[build-system]
-requires = ['setuptools>=61', 'wheel']
-build-backend = 'setuptools.build_meta'
-
-[project]
+[tool.poetry]
 name = 'jax_forward_laplacian'
 version = '0.1'
 description = 'JAX implementation of the forward Laplacian operator'
 authors = [
-    {name = "Nicholas Gao", email = "ngao@tum.de"},
-    {name = "Jonas Koehler", email = "jonas.koehler@microsoft.com"},
-    {name = "Adam Foster", email = "adam.e.foster@microsoft.com"},
+    "Nicholas Gao <ngao@tum.de>",
+    "Jonas Koehler <jonas.koehler@microsoft.com>",
+    "Adam Foster <adam.e.foster@microsoft.com>"
 ]
 maintainers = [
-    {name = "Nicholas Gao", email = "ngao@tum.de"},
-    {name = "Jonas Koehler", email = "jonas.koehler@microsoft.com"},
+    "Nicholas Gao <ngao@tum.de>",
+    "Jonas Koehler <jonas.koehler@microsoft.com>"
 ]
-
-[tool.poetry]
+license = 'MIT'
 readme = 'README.md'
-license = {text = 'MIT'}
+homepage = 'https://github.com/microsoft/jax-forward-laplacian'
+repository = 'https://github.com/microsoft/jax-forward-laplacian'
 keywords = ["jax", "laplacian", "numeric"]
 classifiers = [
     'Development Status :: 4 - Beta',
@@ -33,18 +29,15 @@ classifiers = [
     'Programming Language :: Python :: 3.10',
     'Programming Language :: Python :: 3.11'
 ]
-requires-python = ">=3.10"
-dependencies = [
-    'jax',
-    'jaxlib',
-    'jaxtyping',
-    'jax-dataclasses',
-    'numpy',
-    'pytest',
-]
 
-[project.optional-dependencies]
-dev = []
+[tool.poetry.dependencies]
+python = ">=3.10"
+jax = "*"
+jaxlib = "*"
+jax-dataclasses = "*"
+numpy = "*"
+pytest = "*"
 
-[project.urls]
-repository = 'https://github.com/microsoft/jax-forward-laplacian'
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

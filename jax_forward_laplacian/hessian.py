@@ -9,27 +9,12 @@ import jaxlib.xla_extension
 import numpy as np
 from jax import core
 
-from .api import (
-    JAC_DIM,
-    Array,
-    Axes,
-    ExtraArgs,
-    ForwardFn,
-    FunctionFlags,
-    FwdLaplArgs,
-    FwdLaplArray,
-    MergeFn,
-)
-from .utils import (
-    add_vmap_jacobian_dim,
-    array_wise_flat_wrap,
-    flat_wrap,
-    get_reduced_jacobians,
-    jac_jacT,
-    trace_jac_jacT,
-    trace_of_product,
-    vmap_sequences_and_squeeze,
-)
+from .api import (JAC_DIM, Axes, ExtraArgs, ForwardFn, FunctionFlags,
+                  FwdLaplArgs, FwdLaplArray, MergeFn)
+from .types import Array
+from .utils import (add_vmap_jacobian_dim, array_wise_flat_wrap, flat_wrap,
+                    get_reduced_jacobians, jac_jacT, trace_jac_jacT,
+                    trace_of_product, vmap_sequences_and_squeeze)
 
 
 def general_jac_hessian_jac(fn: ForwardFn, args: FwdLaplArgs, materialize_idx: Array | None):

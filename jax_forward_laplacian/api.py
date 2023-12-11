@@ -7,7 +7,8 @@ import jax_dataclasses as jdc
 import numpy as np
 import numpy.typing as npt
 from jax import core
-from jaxtyping import Array, PyTree
+
+from .types import Array, PyTree
 
 T = TypeVar("T", bound=PyTree[Array])
 R = TypeVar("R", bound=PyTree[Array])

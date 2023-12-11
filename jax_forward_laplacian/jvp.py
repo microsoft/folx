@@ -7,28 +7,12 @@ import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
 
-from .api import (
-    JAC_DIM,
-    Array,
-    Arrays,
-    Axes,
-    ExtraArgs,
-    ForwardFn,
-    FunctionFlags,
-    FwdJacobian,
-    FwdLaplArgs,
-    JvpFn,
-    MergeFn,
-    PyTree,
-)
+from .api import (JAC_DIM, Arrays, Axes, ExtraArgs, ForwardFn, FunctionFlags,
+                  FwdJacobian, FwdLaplArgs, JvpFn, MergeFn, PyTree)
 from .tree_utils import tree_concat, tree_idx
-from .utils import (
-    broadcast_dim,
-    broadcast_except,
-    extend_jacobians,
-    get_jacobian_for_reduction,
-    np_concatenate_brdcast,
-)
+from .types import Array, PyTree
+from .utils import (broadcast_dim, broadcast_except, extend_jacobians,
+                    get_jacobian_for_reduction, np_concatenate_brdcast)
 
 R = TypeVar("R", bound=PyTree[Array])
 

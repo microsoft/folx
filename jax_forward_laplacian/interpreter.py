@@ -10,8 +10,10 @@ import numpy as np
 from jax import core
 from jax.util import safe_map
 
-from .api import Array, ArrayOrFwdLaplArray, FunctionFlags, FwdLaplArray, PyTree
-from .fwd_laplacian import add_forward_laplacian, init_forward_laplacian_state, non_lapl_call
+from .api import ArrayOrFwdLaplArray, FunctionFlags, FwdLaplArray
+from .fwd_laplacian import (add_forward_laplacian,
+                            init_forward_laplacian_state, non_lapl_call)
+from .types import Array, PyTree
 
 R = TypeVar("R", bound=PyTree[Array])
 P = ParamSpec("P")

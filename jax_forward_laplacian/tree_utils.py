@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 
-from jaxtyping import PyTree, ArrayLike, Array
+from .types import Array, ArrayLike, PyTree
 
 T = TypeVar("T", bound=PyTree[ArrayLike])
 

@@ -9,11 +9,13 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v2
+      - name: Switch to Current Branch
+        run: git checkout ${{ env.BRANCH }}
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: "3.x"
           cache: 'pip'
 
       - name: Install dependencies

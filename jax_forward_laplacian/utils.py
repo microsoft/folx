@@ -5,9 +5,10 @@ import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
 
-from .api import (IS_LEAF, JAC_DIM, Array, ArrayOrFwdLaplArray, Arrays, Axes,
+from .api import (IS_LEAF, JAC_DIM, ArrayOrFwdLaplArray, Arrays, Axes,
                   ExtraArgs, ForwardFn, FwdJacobian, FwdLaplArgs, FwdLaplArray,
-                  FwdLaplArrays, MergeFn, PyTree)
+                  FwdLaplArrays, MergeFn)
+from .types import Array, ArrayLike, PyTree
 
 T = TypeVar("T")
 
