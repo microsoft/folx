@@ -1,4 +1,5 @@
-# Forward Laplacian
+# folx - forward laplacian for JAX
+
 This submodule implements the forward laplacian from https://arxiv.org/abs/2307.08214. It is implemented as a [custom interpreter for Jaxprs](https://jax.readthedocs.io/en/latest/notebooks/Writing_custom_interpreters_in_Jax.html).
 
 
@@ -6,7 +7,7 @@ This submodule implements the forward laplacian from https://arxiv.org/abs/2307.
 For simple usage, one can decorate any function with `forward_laplacian`.
 ```python
 import numpy as np
-from oneqmc.forward_laplacian import forward_laplacian
+from folx import forward_laplacian
 
 def f(x):
     return (x**2).sum()
