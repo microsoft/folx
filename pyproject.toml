@@ -1,7 +1,7 @@
 [tool.poetry]
-name = 'jax_forward_laplacian'
+name = 'folx'
 version = '0.1'
-description = 'JAX implementation of the forward Laplacian operator'
+description = 'forward mode laplacian for jax'
 authors = [
     "Nicholas Gao <ngao@tum.de>",
     "Jonas Koehler <jonas.koehler@microsoft.com>",
@@ -13,8 +13,8 @@ maintainers = [
 ]
 license = 'MIT'
 readme = 'README.md'
-homepage = 'https://github.com/microsoft/jax-forward-laplacian'
-repository = 'https://github.com/microsoft/jax-forward-laplacian'
+homepage = 'https://github.com/microsoft/folx'
+repository = 'https://github.com/microsoft/folx'
 keywords = ["jax", "laplacian", "numeric"]
 classifiers = [
     'Development Status :: 4 - Beta',
