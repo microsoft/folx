@@ -8,7 +8,7 @@ import numpy as np
 from .api import (IS_LEAF, JAC_DIM, ArrayOrFwdLaplArray, Arrays, Axes,
                   ExtraArgs, ForwardFn, FwdJacobian, FwdLaplArgs, FwdLaplArray,
                   FwdLaplArrays, MergeFn)
-from .types import Array, ArrayLike, PyTree
+from .types import Array, PyTree
 
 T = TypeVar("T")
 

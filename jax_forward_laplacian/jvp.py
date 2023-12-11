@@ -8,7 +8,7 @@ import jax.tree_util as jtu
 import numpy as np
 
 from .api import (JAC_DIM, Arrays, Axes, ExtraArgs, ForwardFn, FunctionFlags,
-                  FwdJacobian, FwdLaplArgs, JvpFn, MergeFn, PyTree)
+                  FwdJacobian, FwdLaplArgs, JvpFn, MergeFn)
 from .tree_utils import tree_concat, tree_idx
 from .types import Array, PyTree
 from .utils import (broadcast_dim, broadcast_except, extend_jacobians,

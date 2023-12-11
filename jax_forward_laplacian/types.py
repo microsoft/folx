@@ -1,11 +1,15 @@
-from typing import Any, Callable, Protocol
+from typing import Callable, Protocol
 
 import jax
-import numpy as np
+from jaxtyping import Array, ArrayLike, PyTree
 
-ArrayLike = jax.Array | float | int | bool | np.ndarray | np.number | np.bool_
-Array = jax.Array
-PyTree = Any
+__all__ = [
+    "Array",
+    "ArrayLike",
+    "PyTree",
+    "Laplacian",
+    "LaplacianOperator",
+]
 
 class Laplacian(Protocol):
     def __call__(self, x: jax.Array) -> tuple[jax.Array, jax.Array]:

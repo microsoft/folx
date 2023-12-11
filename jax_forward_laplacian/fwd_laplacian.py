@@ -6,24 +6,13 @@ import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
 
-from .api import (
-    IS_LPL_ARR,
-    Array,
-    ArrayOrFwdLaplArray,
-    Axes,
-    ExtraArgs,
-    ForwardFn,
-    ForwardLaplacianFns,
-    FunctionFlags,
-    FwdJacobian,
-    FwdLaplArgs,
-    FwdLaplArray,
-    MergeFn,
-    PyTree,
-)
+from .api import (IS_LPL_ARR, Array, ArrayOrFwdLaplArray, Axes, ExtraArgs,
+                  ForwardFn, ForwardLaplacianFns, FunctionFlags, FwdJacobian,
+                  FwdLaplArgs, FwdLaplArray, MergeFn)
 from .hessian import get_jacobian_hessian_jacobian_trace
 from .jvp import get_jvp_function
 from .tree_utils import tree_add
+from .types import PyTree
 from .utils import ravel, split_args
 
 R = TypeVar("R", bound=PyTree[Array])
