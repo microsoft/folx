@@ -1,8 +1,8 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
+from folx import ForwardLaplacianOperator
 from jax.experimental import enable_x64
-from jax_forward_laplacian import ForwardLaplacianOperator
 
 
 def brute_force_laplacian(fn):
