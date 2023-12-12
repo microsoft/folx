@@ -1,5 +1,6 @@
 import functools
 import logging
+from typing import Callable, Sequence
 
 import jax
 import jax.flatten_util as jfu
@@ -9,12 +10,30 @@ import jaxlib.xla_extension
 import numpy as np
 from jax import core
 
-from .api import (JAC_DIM, Axes, ExtraArgs, ForwardFn, FunctionFlags,
-                  FwdLaplArgs, FwdLaplArray, MergeFn)
-from .types import Array
-from .utils import (add_vmap_jacobian_dim, array_wise_flat_wrap, flat_wrap,
-                    get_reduced_jacobians, jac_jacT, trace_jac_jacT,
-                    trace_of_product, vmap_sequences_and_squeeze)
+from .api import (
+    JAC_DIM,
+    Array,
+    Axes,
+    CustomTraceJacHessianJac,
+    ExtraArgs,
+    ForwardFn,
+    FunctionFlags,
+    FwdJacobian,
+    FwdLaplArgs,
+    FwdLaplArray,
+    MergeFn,
+    PyTree,
+)
+from .utils import (
+    add_vmap_jacobian_dim,
+    array_wise_flat_wrap,
+    flat_wrap,
+    get_reduced_jacobians,
+    jac_jacT,
+    trace_jac_jacT,
+    trace_of_product,
+    vmap_sequences_and_squeeze,
+)
 
 
 def general_jac_hessian_jac(fn: ForwardFn, args: FwdLaplArgs, materialize_idx: Array | None):
@@ -92,7 +111,7 @@ def off_diag_jac_hessian_jac(fn: ForwardFn, args: FwdLaplArgs, materialize_idx: 
     return unravel(flat_out)
 
 
-def dot_product_jac_hessian_jac(fn: ForwardFn, args: FwdLaplArgs, shared_idx: Array | None):
+def mul_jac_hessian_jac(fn: ForwardFn, args: FwdLaplArgs, shared_idx: Array | None):
     # For a dot product we know that the hessian looks like this:
     # [0, I]
     # [I, 0]
@@ -105,54 +124,6 @@ def dot_product_jac_hessian_jac(fn: ForwardFn, args: FwdLaplArgs, shared_idx: Ar
     return unravel(flat_out)
 
 
-def slogdet_jac_hessian_jac(args: FwdLaplArgs, materialize_idx: Array | None):
-    # For slogdet we know how to compute the determinant faster.
-    # We can use the fact that the jacobian of logdet is A^-1.
-    # Thus, the hessian is A^-1 (x) A^-T. Where (x) is the kronecker product.
-    # We can now reformulate this to (A^-1 (x) I)(A^-1 (x) I)^T.
-    # If one wants to compute the product vec(M)(A^-1 (x) I), this can be
-    # efficiently evaluated as vec(MA^-1). As we multiply the Hessian from
-    # both sides with the jacobian tr(JHJ^T), this can be efficiently be done
-    # as tr(J@A^-1 @ A^-1^T@J^T) where the inner @ is the outer product.
-    assert len(args.x) == 1
-    A = args.x[0]
-    A_inv = jnp.linalg.inv(A)
-    J = args.jacobian[0].construct_jac_for(materialize_idx)
-    J = jnp.moveaxis(J, JAC_DIM, -1)
-    leading_dims = A.shape[:-2]
-    x0_dim = J.shape[-1]
-
-    def elementwise(A_inv, J):
-        # Naive implementation
-        # @functools.partial(jax.vmap, in_axes=(-1, None), out_axes=-1)
-        # @functools.partial(jax.vmap, in_axes=(None, -1), out_axes=-1)
-        # def inner(v1, v2):
-        #     A_inv_v = A_inv@v1
-        #     v_A_inv = v2.T@A_inv.T
-        #     return -v_A_inv.reshape(-1)@A_inv_v.reshape(-1)
-        # vHv = inner(J, J)
-        # trace = jnp.trace(vHv)
-
-        # We can do better and compute the trace more efficiently.
-        A_inv_J = jnp.einsum("ij,jdk->idk", A_inv, J)
-        trace = -trace_of_product(
-            jnp.transpose(A_inv_J, (1, 0, 2)).reshape(-1, x0_dim), A_inv_J.reshape(-1, x0_dim)
-        )
-        return jnp.zeros(()), trace
-
-    A_inv = A_inv.reshape(-1, *A.shape[-2:])
-    J = J.reshape(-1, *J.shape[-3:])
-
-    # We can either use vmap or scan. Scan is slightly slower but uses less memory.
-    # Here we assume that we will in general encounter larger determinants rather than many.
-    # signs, flat_out = jax.vmap(elementwise)(A_inv, J)
-    def scan_wrapper(_, x):
-        return None, elementwise(*x)
-
-    signs, flat_out = jax.lax.scan(scan_wrapper, None, (A_inv, J))[1]
-    return signs.reshape(leading_dims), flat_out.reshape(leading_dims)
-
-
 def remove_fill(arrs: np.ndarray, find_unique: bool = False):
     """
     Remove the fill value from an array. As the tensors might not be shaped correctly
@@ -163,14 +134,16 @@ def remove_fill(arrs: np.ndarray, find_unique: bool = False):
     Returns:
         - arrs: nested lists of arrays without fill value
     """
-    if arrs.ndim > 1:
-        return [remove_fill(x) for x in arrs]
+    if arrs.size == 0:
+        return arrs
+    if arrs[0].ndim >= 1:
+        return [remove_fill(x, find_unique=find_unique) for x in arrs]
     if find_unique:
         arrs = np.unique(arrs)
     return arrs[arrs >= 0]  # type: ignore
 
 
-def merge_and_populate(arrs, operation):
+def merge_and_populate(arrs: Sequence[np.ndarray], operation: Callable[[np.ndarray, np.ndarray], np.ndarray]):
     """
     The arrays are assumed to be of the same shape. We look at the intersection of all arrays.
     We then find the maximum intersection size and fill all arrays to that size.
@@ -209,40 +182,31 @@ def find_materialization_idx(lapl_args: FwdLaplArgs, in_axes, flags: FunctionFla
         # This can be quite memory intensive, so we try to do it on the GPU and
         # if that fails we just use the CPU. On the CPU this takes quite some time.
         # TODO: work on a more memory efficient implementation!
+        unique_fn = functools.partial(jnp.unique, size=max_size + 1, fill_value=-1)
+
+        def idx_fn(x):
+            return jtu.tree_map(unique_fn, x)
+        for s in vmap_seq[::-1]:
+            idx_fn = jax.vmap(idx_fn, in_axes=s)
         try:
             # This path is more memory intensive by using the GPU to find uniques but
             # potentially fails if the arrays are too large.
-            # +1 because we need to accommodate the -1.
-            unique_fn = functools.partial(jnp.unique, size=max_size + 1, fill_value=-1)
-
-            def idx_fn(x):
-                return jtu.tree_map(unique_fn, x)
-
-            for s in vmap_seq[::-1]:
-                idx_fn = jax.vmap(idx_fn, in_axes=s)
+            # +1 because we need to accomodate the -1.
             arrs = np.asarray(idx_fn(inp), dtype=int)
-            filtered_arrs = remove_fill(arrs, False)
         except jaxlib.xla_extension.XlaRuntimeError:
             logging.info(
                 "Failed to find unique elements on GPU, falling back to CPU. This will be slow."
             )
-            # materialize the full array on CPU and then use numpy to sequentially find
-            # unique elements.
-            def identity(x):
-                return x
-
-            for s in vmap_seq[::-1]:
-                identity = jax.vmap(identity, in_axes=s)
             with jax.default_device(jax.devices("cpu")[0]):
-                arrs = np.asarray(identity(inp), dtype=int)
-            filtered_arrs = remove_fill(arrs, True)
+                arrs = np.asarray(idx_fn(inp), dtype=int)
+        filtered_arrs = remove_fill(arrs, False)
 
     if FunctionFlags.LINEAR_IN_ONE in flags:
         # For off diagonal Hessians we only need to look at the intersection between
         # all arrays rather than their union.
-        idx = merge_and_populate(filtered_arrs, np.intersect1d)
+        idx = merge_and_populate(filtered_arrs, np.intersect1d) # type: ignore
     else:
-        idx = merge_and_populate(filtered_arrs, np.union1d)
+        idx = merge_and_populate(filtered_arrs, np.union1d) # type: ignore
     idx = np.moveaxis(idx, -1, JAC_DIM)
 
     if idx.shape[JAC_DIM] >= max_size or idx.shape[JAC_DIM] > threshold:
@@ -250,27 +214,66 @@ def find_materialization_idx(lapl_args: FwdLaplArgs, in_axes, flags: FunctionFla
     return idx
 
 
+def remove_zero_entries(lapl_args: FwdLaplArgs, materialize_idx: np.ndarray | None):
+    if materialize_idx is None:
+        return lapl_args, None, None
+    
+    mask = (materialize_idx != -1).any(0)
+    if mask.sum() > 0.5 * mask.size:
+        # this is a heuristic to avoid having unnecessary indexing overhead for
+        # insufficiently sparse masks.
+        return lapl_args, materialize_idx, None
+
+    indices = np.where(mask)
+    new_mat_idx = materialize_idx[(slice(None), *indices)]
+    new_arrs = []
+    for arg in lapl_args.arrays:
+        brdcast_dims = np.where(np.array(arg.x.shape) == 1)[0]
+        idx = tuple(
+            0 if i in brdcast_dims else x
+            for i, x in enumerate(indices)
+        )
+        new_arrs.append(FwdLaplArray(
+            x=arg.x[idx],
+            jacobian=FwdJacobian(
+                data=arg.jacobian.data[(slice(None), *idx)],
+                x0_idx=arg.jacobian.x0_idx[(slice(None), *idx)], # type: ignore
+            ),
+            laplacian=arg.laplacian[idx],
+        ))
+    new_args = FwdLaplArgs(tuple(new_arrs))
+    return new_args, new_mat_idx, mask
+
+
 def vmapped_jac_hessian_jac(
-    unmerged_fn: ForwardFn,
-    lapl_args: FwdLaplArgs,
-    in_axes,
-    extra_args: ExtraArgs,
-    extra_in_axes,
-    merge: MergeFn,
+    fwd: ForwardFn,
     flags: FunctionFlags,
+    custom_jac_hessian_jac: CustomTraceJacHessianJac | None,
+    extra_args: ExtraArgs,
+    in_axes: Axes,
+    extra_in_axes: Axes,
+    merge: MergeFn,
     sparsity_threshold: int,
-):
+    lapl_args: FwdLaplArgs,
+) -> PyTree[Array]:
     # Determine output structure
     def merged_fn(*x: Array):
-        return unmerged_fn(*merge(x, extra_args))
-
-    unravel = jfu.ravel_pytree(merged_fn(*lapl_args.x))[1]
+        return fwd(*merge(x, extra_args))
+    out = merged_fn(*lapl_args.x)
+    unravel = jfu.ravel_pytree(out)[1]
 
     materialize_idx = find_materialization_idx(lapl_args, in_axes, flags, sparsity_threshold)
     if materialize_idx is None:
         lapl_args = lapl_args.dense
     if materialize_idx is not None and materialize_idx.shape[JAC_DIM] == 0:
         return jnp.zeros(())
+    
+    # If we do a dot product (not a hadamard product) we can check for empty hessian entries
+    if FunctionFlags.DOT_PRODUCT in flags and all(len(a) == 1 for a in in_axes):
+        lapl_args, materialize_idx, mask = remove_zero_entries(lapl_args, materialize_idx)
+        in_axes = jtu.tree_map(lambda _: -1, in_axes)
+    else:
+        mask = None
 
     # Broadcast and flatten all arguments
     vmap_seq, (lapl_args, extra_args) = vmap_sequences_and_squeeze(
@@ -280,14 +283,14 @@ def vmapped_jac_hessian_jac(
     # Hessian computation
     def hess_transform(args: FwdLaplArgs, extra_args: ExtraArgs, materialize_idx):
         def merged_fn(*x):
-            return unmerged_fn(*merge(x, extra_args))
-
-        if FunctionFlags.DOT_PRODUCT in flags:
-            result = dot_product_jac_hessian_jac(merged_fn, args, materialize_idx)
+            return fwd(*merge(x, extra_args))
+        
+        if custom_jac_hessian_jac is not None:
+            result = custom_jac_hessian_jac(args, extra_args, merge, materialize_idx)
+        elif FunctionFlags.MULTIPLICATION in flags:
+            result = mul_jac_hessian_jac(merged_fn, args, materialize_idx)
         elif FunctionFlags.LINEAR_IN_ONE in flags:
             result = off_diag_jac_hessian_jac(merged_fn, args, materialize_idx)
-        elif FunctionFlags.SLOGDET in flags:
-            result = slogdet_jac_hessian_jac(args, materialize_idx)
         else:
             result = general_jac_hessian_jac(merged_fn, args, materialize_idx)
         return result
@@ -298,32 +301,46 @@ def vmapped_jac_hessian_jac(
             hess_transform, in_axes=(*axes, (None if materialize_idx is None else 1))
         )
     # flatten to 1D and then unravel to the original structure
-    flat_out = jfu.ravel_pytree(hess_transform(lapl_args, extra_args, materialize_idx))[0]
+    if mask is None:
+        flat_out = jfu.ravel_pytree(hess_transform(lapl_args, extra_args, materialize_idx))[0]
+    else:
+        flat_out = hess_transform(lapl_args, extra_args, materialize_idx)
+        result = jnp.zeros_like(out).at[mask].set(flat_out) # type: ignore
+        flat_out = jfu.ravel_pytree(result)[0]
     return unravel(flat_out)
 
 
 def get_jacobian_hessian_jacobian_trace(
     fwd: ForwardFn,
-    fn_flags: FunctionFlags,
+    flags: FunctionFlags,
+    custom_jac_hessian_jac: CustomTraceJacHessianJac | None,
     extra_args: ExtraArgs,
     in_axes: Axes,
     extra_in_axes: Axes,
     merge: MergeFn,
 ):
     def hessian_transform(args: FwdLaplArgs, sparsity_threshold: int):
-        if FunctionFlags.LINEAR in fn_flags:
+        if FunctionFlags.LINEAR in flags:
             return jnp.zeros(())
-        elif FunctionFlags.LINEAR_IN_ONE in fn_flags and len(args.arrays) == 1:
+        elif FunctionFlags.LINEAR_IN_ONE in flags and len(args.arrays) == 1:
             return jnp.zeros(())
         elif (
-            FunctionFlags.LINEAR_IN_FIRST in fn_flags
+            FunctionFlags.LINEAR_IN_FIRST in flags
             and jtu.tree_leaves(merge(args.x, extra_args))[0] is args.x[0]
             and len(args.arrays) == 1
         ):
             return jnp.zeros(())
         else:
             return vmapped_jac_hessian_jac(
-                fwd, args, in_axes, extra_args, extra_in_axes, merge, fn_flags, sparsity_threshold
+                fwd=fwd,
+                flags=flags,
+                custom_jac_hessian_jac=custom_jac_hessian_jac,
+                extra_args=extra_args,
+                in_axes=in_axes,
+                extra_in_axes=extra_in_axes,
+                merge=merge,
+                sparsity_threshold=sparsity_threshold,
+                lapl_args=args,
             )
 
     return hessian_transform

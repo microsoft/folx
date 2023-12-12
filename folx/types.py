@@ -1,21 +1,19 @@
 from typing import Callable, Protocol
 
-import jax
-from jaxtyping import Array, ArrayLike, PyTree
+from .api import Array
+
 
 __all__ = [
-    "Array",
-    "ArrayLike",
-    "PyTree",
     "Laplacian",
     "LaplacianOperator",
 ]
 
+
 class Laplacian(Protocol):
-    def __call__(self, x: jax.Array) -> tuple[jax.Array, jax.Array]:
+    def __call__(self, x: Array) -> tuple[Array, Array]:
         ...
 
 
 class LaplacianOperator(Protocol):
-    def __call__(self, f: Callable[[jax.Array], jax.Array]) -> Laplacian:
+    def __call__(self, f: Callable[[Array], Array]) -> Laplacian:
         ...

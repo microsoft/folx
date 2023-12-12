@@ -1,14 +1,14 @@
 [tool.poetry]
 name = 'folx'
-version = '0.1'
+version = '0.2'
 description = 'forward mode laplacian for jax'
 authors = [
-    "Nicholas Gao <ngao@tum.de>",
+    "Nicholas Gao <n.gao@tum.de>",
     "Jonas Koehler <jonas.koehler@microsoft.com>",
     "Adam Foster <adam.e.foster@microsoft.com>"
 ]
 maintainers = [
-    "Nicholas Gao <ngao@tum.de>",
+    "Nicholas Gao <n.gao@tum.de>",
     "Jonas Koehler <jonas.koehler@microsoft.com>"
 ]
 license = 'MIT'
@@ -34,7 +34,6 @@ classifiers = [
 python = ">=3.10,<4.0"
 jax = "*"
 jaxlib = "*"
-jax-dataclasses = "*"
 jaxtyping = "*"
 numpy = "*"
 pytest = "*"
