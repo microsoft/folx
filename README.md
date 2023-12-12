@@ -2,6 +2,20 @@
 
 This submodule implements the forward laplacian from https://arxiv.org/abs/2307.08214. It is implemented as a [custom interpreter for Jaxprs](https://jax.readthedocs.io/en/latest/notebooks/Writing_custom_interpreters_in_Jax.html).
 
+## Install
+
+Either clone repo and install locally via 
+```bash
+poetry install
+```
+or
+```bash
+pip install .
+```
+or install via `pip` package manager via
+```bash
+pip install folx
+```
 
 ## Example
 For simple usage, one can decorate any function with `forward_laplacian`.
