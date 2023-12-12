@@ -63,29 +63,65 @@ But instead of using the [standard evaluation pipeline](https://github.com/googl
 
 ### Package structure
 The general structure of the package is
-1. `interpreter.py` contains the evaluation of jaxpr and exported function decorator. 
-2. `fwd_laplacian.py` contains subfunction decorator that maps a function that takes `jax.Array`s to a function that accepts `FwdLaplArray`s instead.
-3. `jvp.py` contains logic for jacobian vector products.
-4. `hessian.py` contains logic for tr(JHJ^T).
-5. `api.py` contains general interfaces shared in the package.
-6. `utils.py` contains several small utility functions.
-7. `tree_utils.py` contains several utility functions for PyTrees. 
+* `interpreter.py` contains the evaluation of jaxpr and exported function decorator. 
+* `wrapper.py` contains subfunction decorator that maps a function that takes `jax.Array`s to a function that accepts `FwdLaplArray`s instead.
+* `wrapped_functions.py` contains a registry of predefined functions as well as utility functions to add new functions to the registry.
+* `jvp.py` contains logic for jacobian vector products.
+* `hessian.py` contains logic for tr(JHJ^T).
+* `custom_hessian.py` contains special treatment logic for tr(JHJ^T).
+* `api.py` contains general interfaces shared in the package.
+* `types.py` contains a general interfaces for a laplacian operator.
+* `utils.py` contains several small utility functions.
+* `tree_utils.py` contains several utility functions for PyTrees. 
+* `vmap.py` contains a batched vmap implementation to reduce memory usage by going through a batch sequentially in chunks.
 
 
 ### Function Annotations
 There is a default interpreter that will simply apply the rules outlined above but if additional information about a function is available, e.g., that it applies elementwise like `jnp.tanh`, we can do better.
-These additional annotations are available in `interpreters.py`'s `_LAPLACE_FN_REGISTRY`. 
-Specifically, to augment a function `fn` to accept `FwdLaplArray` instead of regular `jax.Array`, we wrap it with `add_forward_laplacian` from `fwd_laplacian.py`:
+These additional annotations are available in `wrapped_functions.py`'s `LAPLACE_FN_REGISTRY`. 
+Specifically, to augment a function `fn` to accept `FwdLaplArray` instead of regular `jax.Array`, we wrap it with `wrap_forward_laplacian` from `fwd_laplacian.py`:
 ```python
-add_forward_laplacian(jnp.tanh, in_axes=())
+wrap_forward_laplacian(jnp.tanh, in_axes=())
 ```
 In this case, we annotate the function to be applied elementwise, i.e., `()` indicates that none of the axes are relevant for the function.
 
 If we know nothing about which axes might be essential, one must pass `None` (the default value) to mark all axes as imporatnt, e.g.,
 ```python
-add_forward_laplacian(jnp.sum, in_axes=None, flags=FunctionFlags.LINEAR)
+wrap_forward_laplacian(jnp.sum, in_axes=None, flags=FunctionFlags.LINEAR)
 ```
 However, in this case we know that a summation is a linear operation. This information is useful for fast hessian computations.
+
+If you want rules to a function and add it to the registry you can do the following
+```python
+import jax
+from folx import register_function, wrap_forward_laplacian
+
+register_function(jax.lax.cos_p, wrap_forward_laplacian(f, in_axes=()))
+# Now the tracer is aware that the cosine function is applied elementwise.
+```
+We can do even more by defining custom rules:
+```python
+import jax
+from folx import register_function, wrap_forward_laplacian
+
+# the jit is important
+@jax.jit
+def f(x):
+    return x
+
+# define a custom jacobian hessian jacobian product rule
+def custom_jac_hessian_jac(args, extra_args, merge, materialize_idx):
+    return jtu.tree_map(lambda x: jnp.full_like(x, 10), args.x)
+
+# make sure to use the same name here as above
+register_function("f", wrap_forward_laplacian(f, custom_jac_hessian_jac=custom_jac_hessian_jac))
+
+@forward_laplacian
+def g(x):
+    return f(x)
+
+g(jnp.ones(())).laplacian # 10
+```
 
 
 ### Sparsity

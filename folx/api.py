@@ -1,14 +1,12 @@
 from enum import IntFlag
-from typing import Any, Callable, Protocol, TypeAlias, TypeVar
+from typing import Any, Callable, NamedTuple, Protocol, TypeAlias, TypeVar
 
 import jax
 import jax.numpy as jnp
-import jax_dataclasses as jdc
 import numpy as np
 import numpy.typing as npt
 from jax import core
-
-from .types import Array, PyTree
+from jaxtyping import Array, PyTree
 
 T = TypeVar("T", bound=PyTree[Array])
 R = TypeVar("R", bound=PyTree[Array])
@@ -19,15 +17,13 @@ Arrays = tuple[Array, ...]
 JAC_DIM = 0  # should be either 0 or -1. TODO: switching is not support.
 
 
-
-@jdc.pytree_dataclass
-class FwdJacobian:
+class FwdJacobian(NamedTuple):
     """
     Represents the Jacobian of a tensor with respect to the function's initial arguments.
     The Jacobian may either be sparse or dense. So, for a function f: R^n -> R^m, the
     Jacobian is an n x m matrix. If the Jacobian is dense, we also store it as such.
     However, it might be that the Jacobian is sparse, e.g., if f(x)=x. In such a case
-    the Jacobian tensor is mostly sparse along the last dimension. Instead of explicitly
+    the Jacobian tensor is mostly sparse along the last dimension. Instead of explictily
     storing all of the zeros, we store the non-zero elements and to which of the n inputs
     it depends on. So, instead of storing a n xm matrix, we store a k x m matrix, where
     k is maximum number of elements any element in m depends on. Additionally we store
@@ -39,7 +35,7 @@ class FwdJacobian:
     A few notes:
     - If sparsity patterns are modified in jax functions, we have to disable omnistaging.
     - Materializing the dense array is expensive and should be avoided if possible.
-    - As we do not explicitly keep track of m, it might be that two dense Jacobians differ
+    - As we do not explictily keep track of m, it might be that two dense Jacobians differ
       in the last dimension. This is not a problem as we can always pad the smaller one.
     """
 
@@ -106,7 +102,7 @@ class FwdJacobian:
             return jax.ops.segment_sum(x, indices, max_idx)
 
         result = aggregate(x, idx).reshape(x_shape)
-        result = jnp.transpose(result, tuple(inv_order))
+        result = jnp.transpose(result, inv_order)
         return result
 
     def get_index_mask(self, outputs):
@@ -154,21 +150,25 @@ class FwdJacobian:
             return self.dense_array
         if len(idx) == 0:
             return jnp.zeros((*self.data_shape, 0))
-        if self.x0_idx is not None:
-            return self.materialize_for_idx(self.get_index_mask(idx), len(idx))
-        else:
+        if self.x0_idx is None:
             return self.data[idx]
+        return self.materialize_for_idx(self.get_index_mask(idx), len(idx))
 
     @property
     def dense_array(self) -> Array:
         """
         Returns the dense Jacobian. If the Jacobian is sparse, we materialize it first.
         """
-        if self.x0_idx is not None:
-            ext_idx = (..., *((None,) * len(self.data_shape)))  # this is for mypy
-            return self.construct_jac_for(np.arange(np.max(self.x0_idx).item() + 1)[ext_idx])
-        else:
+        if self.x0_idx is None:
             return self.data
+        ext_idx = (..., *((None,) * len(self.data_shape)))  # this is for mypy
+        return self.construct_jac_for(np.arange(self.max_n + 1)[ext_idx])
+    
+    @property
+    def max_n(self) -> int:
+        if self.x0_idx is not None:
+            return int(np.max(self.x0_idx))
+        return self.data.shape[JAC_DIM]
 
     @property
     def as_dense(self):
@@ -201,10 +201,23 @@ class FwdJacobian:
     @classmethod
     def from_dense(cls, array):
         return cls(array, None)
+    
+    def __add__(self, other):
+        assert isinstance(other, FwdJacobian)
+        # If any is not weak we just add dense jacobians
+        if not self.weak or not other.weak:
+            from .utils import add_jacobians
+            return FwdJacobian(add_jacobians(self.as_dense.data, other.as_dense.data))
+        # If both are weak, we can keep them sparse
+        if (other.x0_idx == self.x0_idx).all():
+            return FwdJacobian(self.data + other.data, np.broadcast_arrays(self.x0_idx, other.x0_idx)[0]) # type: ignore
+        return FwdJacobian(
+            data=jnp.concatenate((self.data, other.data), axis=JAC_DIM),
+            x0_idx=np.concatenate((self.x0_idx, other.x0_idx), axis=JAC_DIM), # type: ignore
+        )
 
 
-@jdc.pytree_dataclass
-class FwdLaplArray:
+class FwdLaplArray(NamedTuple):
     """
     Represents a triplet of a tensor, its Jacobian and its Laplacian with respect to
     the function's initial arguments.
@@ -255,8 +268,7 @@ FwdLaplArrays = tuple[FwdLaplArray, ...]
 ArrayOrFwdLaplArray: TypeAlias = Array | FwdLaplArray
 
 
-@jdc.pytree_dataclass
-class FwdLaplArgs:
+class FwdLaplArgs(NamedTuple):
     """
     Utility class that represents a tuple of tensors, their Jacobians and their
     Laplacians with respect to the function's initial arguments.
@@ -307,7 +319,7 @@ class FwdLaplArgs:
             tuple(
                 jacobians[j]
                 if i == j
-                else jnp.zeros((jacobians[i].shape[0], *jacobians[j].shape[1:]))
+                else jnp.zeros((jacobians[i].shape[0], *jacobians[j].shape[1:]), dtype=jacobians[j].dtype)
                 for j in range(len(jacobians))
             )
             for i in range(len(jacobians))
@@ -328,8 +340,7 @@ class MergeFn(Protocol):
         ...
 
 
-@jdc.pytree_dataclass
-class ForwardLaplacianFns:
+class ForwardLaplacianFns(NamedTuple):
     forward: ForwardFn
     jvp: Callable[[FwdLaplArgs, dict[str, Any]], tuple[ArrayOrArrays, FwdJacobian, ArrayOrArrays]]
     jac_hessian_jac_trace: Callable[[FwdLaplArgs, int], ArrayOrArrays]
@@ -340,13 +351,24 @@ class JvpFn(Protocol):
         ...
 
 
+class CustomTraceJacHessianJac(Protocol):
+    def __call__(self, args: FwdLaplArgs, extra_args: ExtraArgs, merge: MergeFn, materialize_idx: Array) -> PyTree[Array]:
+        ...
+
+
+class ForwardLaplacian(Protocol):
+    def __call__(self, *args: ArrayOrFwdLaplArray, sparsity_threshold: int , **kwargs) -> PyTree[ArrayOrFwdLaplArray]:
+        ...
+
+
 class FunctionFlags(IntFlag):
     GENERAL = 0
-    LINEAR_IN_ONE = 1
-    LINEAR_IN_FIRST = 2
-    LINEAR = 4 | LINEAR_IN_ONE | LINEAR_IN_FIRST
+    LINEAR_IN_FIRST = 1
+    LINEAR_IN_ONE = 2 | LINEAR_IN_FIRST
+    LINEAR = 4 | LINEAR_IN_ONE
     REDUCTION = 8
-    DOT_PRODUCT = 16 | REDUCTION | LINEAR_IN_ONE
-    INDEXING = 32 | LINEAR
-    SCATTER = 64
-    SLOGDET = 128
+    MULTIPLICATION = 16 | LINEAR_IN_ONE
+    DOT_PRODUCT = 32 | REDUCTION | MULTIPLICATION
+    INDEXING = 64 | LINEAR
+    SCATTER = 128
+    JOIN_JVP = 256

@@ -5,10 +5,22 @@ import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
 
-from .api import (IS_LEAF, JAC_DIM, ArrayOrFwdLaplArray, Arrays, Axes,
-                  ExtraArgs, ForwardFn, FwdJacobian, FwdLaplArgs, FwdLaplArray,
-                  FwdLaplArrays, MergeFn)
-from .types import Array, PyTree
+from .api import (
+    JAC_DIM,
+    Array,
+    IS_LEAF,
+    ArrayOrFwdLaplArray,
+    Arrays,
+    Axes,
+    ExtraArgs,
+    ForwardFn,
+    FwdJacobian,
+    FwdLaplArgs,
+    FwdLaplArray,
+    FwdLaplArrays,
+    MergeFn,
+    PyTree,
+)
 
 T = TypeVar("T")
 
@@ -325,7 +337,7 @@ def broadcast_except(arrs, axis):
         broadcast = np.broadcast_to if isinstance(a, np.ndarray) else jnp.broadcast_to
         moveaxis = np.moveaxis if isinstance(a, np.ndarray) else jnp.moveaxis
         out = broadcast(moveaxis(a, axis, -1), (*max_pre, *max_post, a.shape[axis]))
-        return moveaxis(out, -1, axis)  # type: ignore
+        return moveaxis(out, -1, axis) # type: ignore
 
     return jtu.tree_map(broadcast, arrs)
 
@@ -334,23 +346,21 @@ def extend_jacobians(*x: Array, axis):
     """
     Extends the given arrays to the same shape by appending zeros.
     """
+    if len(x) == 1:
+        return x
     if axis < 0:
         axis += jtu.tree_leaves(x)[0].ndim
     max_dim = max([a.shape[axis] for a in x])
     if all(a.shape[axis] == max_dim for a in x):
         return x
-    return tuple(
-        jnp.concatenate(
-            [
-                a,
-                jnp.zeros(
-                    (*a.shape[:axis], max_dim - a.shape[axis], *a.shape[axis + 1 :]), dtype=a.dtype
-                ),
-            ],
-            axis=axis,
-        )
-        for a in x
-    )
+    result = []
+    for a in x:
+        a_shape = list(a.shape)
+        if a_shape[axis] < max_dim:
+            a_shape[axis] = max_dim - a.shape[axis]
+            a = jnp.concatenate([a, jnp.zeros(a_shape, dtype=a.dtype)], axis=axis)
+        result.append(a)
+    return tuple(result)
 
 
 def broadcast_dim(xs: Sequence[np.ndarray] | Sequence[Array], fill_value, axis):
@@ -483,3 +493,27 @@ def get_jacobian_for_reduction(jacs: Sequence[FwdJacobian], axes):
     # Remove all contracted dimensions again
     out_mask = out_masks[0].reshape(-1, *kept_shape)
     return jacobians, out_mask
+
+
+def add_jacobians(jac1: Array, jac2: Array):
+    """
+    Adds two dense jacobians.
+    """
+    jac1, jac2 = extend_jacobians(jac1, jac2, axis=JAC_DIM)
+    return jac1 + jac2
+
+
+def extract_jacobian_mask(arrays: Sequence[ArrayOrFwdLaplArray]):
+    indices = []
+    for arr in arrays:
+        if isinstance(arr, FwdLaplArray):
+            indices.append(arr.jacobian.x0_idx)
+    
+    def merge(arrs: ArrayOrFwdLaplArray):
+        idx_iter = iter(indices)
+        return [
+            arr._replace(jacobian=arr.jacobian._replace(x0_idx=next(idx_iter))) if isinstance(arr, FwdLaplArray) else arr
+            for arr in arrs
+        ]
+
+    return merge
