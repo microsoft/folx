@@ -78,7 +78,7 @@ The general structure of the package is
 
 ### Function Annotations
 There is a default interpreter that will simply apply the rules outlined above but if additional information about a function is available, e.g., that it applies elementwise like `jnp.tanh`, we can do better.
-These additional annotations are available in `wrapped_functions.py`'s `LAPLACE_FN_REGISTRY`. 
+These additional annotations are available in `wrapped_functions.py`'s `_LAPLACE_FN_REGISTRY`. 
 Specifically, to augment a function `fn` to accept `FwdLaplArray` instead of regular `jax.Array`, we wrap it with `wrap_forward_laplacian` from `fwd_laplacian.py`:
 ```python
 wrap_forward_laplacian(jnp.tanh, in_axes=())

@@ -23,7 +23,7 @@ class FwdJacobian(NamedTuple):
     The Jacobian may either be sparse or dense. So, for a function f: R^n -> R^m, the
     Jacobian is an n x m matrix. If the Jacobian is dense, we also store it as such.
     However, it might be that the Jacobian is sparse, e.g., if f(x)=x. In such a case
-    the Jacobian tensor is mostly sparse along the last dimension. Instead of explictily
+    the Jacobian tensor is mostly sparse along the last dimension. Instead of explicitly
     storing all of the zeros, we store the non-zero elements and to which of the n inputs
     it depends on. So, instead of storing a n xm matrix, we store a k x m matrix, where
     k is maximum number of elements any element in m depends on. Additionally we store
@@ -35,7 +35,7 @@ class FwdJacobian(NamedTuple):
     A few notes:
     - If sparsity patterns are modified in jax functions, we have to disable omnistaging.
     - Materializing the dense array is expensive and should be avoided if possible.
-    - As we do not explictily keep track of m, it might be that two dense Jacobians differ
+    - As we do not explicitly keep track of m, it might be that two dense Jacobians differ
       in the last dimension. This is not a problem as we can always pad the smaller one.
     """
 
