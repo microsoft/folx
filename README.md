@@ -1,4 +1,4 @@
-# folx - forward laplacian for JAX
+# `folx` - Forward Laplacian for JAX
 
 This submodule implements the forward laplacian from https://arxiv.org/abs/2307.08214. It is implemented as a [custom interpreter for Jaxprs](https://jax.readthedocs.io/en/latest/notebooks/Writing_custom_interpreters_in_Jax.html).
 
@@ -84,7 +84,7 @@ The general structure of the package is
 * `hessian.py` contains logic for tr(JHJ^T).
 * `custom_hessian.py` contains special treatment logic for tr(JHJ^T).
 * `api.py` contains general interfaces shared in the package.
-* `types.py` contains a general interfaces for a laplacian operator.
+* `operators.py` contains a forward laplacian operator as well as alternatives.
 * `utils.py` contains several small utility functions.
 * `tree_utils.py` contains several utility functions for PyTrees. 
 * `vmap.py` contains a batched vmap implementation to reduce memory usage by going through a batch sequentially in chunks.
