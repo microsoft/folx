@@ -158,6 +158,27 @@ with core.new_main(core.EvalTrace, dynamic=True):
     ...
 ```
 
+## Citation
+If you find work helpful, please consider citing it as
+```
+@software{folx2023gao,
+  author = {Nichoals Gao and Jonas Köhler and Adam Foster},
+  title = {folx - Forward Laplacian for JAX},
+  url = {http://github.com/microsoft/folx},
+  version = {0.2.0},
+  year = {2023},
+}
+```
+as well as the original forward laplacian:
+```
+@article{li2023forward,
+  title={Forward Laplacian: A New Computational Framework for Neural Network-based Variational Monte Carlo},
+  author={Li, Ruichen and Ye, Haotian and Jiang, Du and Wen, Xuelan and Wang, Chuwei and Li, Zhe and Li, Xiang and He, Di and Chen, Ji and Ren, Weiluo and Wang, Liwei},
+  journal={arXiv preprint arXiv:2307.08214},
+  year={2023}
+}
+```
+
 ## Contributing
 
 This project welcomes contributions and suggestions.  Most contributions require you to agree to a
