@@ -295,7 +295,7 @@ def ravel(pytree):
         unravelled = []
         idx = 0
         for shape in shapes:
-            size = np.prod(shape)
+            size = np.prod(shape, dtype=int)
             unravelled.append(arr[idx : idx + size].reshape(shape))
             idx += size
         return tree_def.unflatten(unravelled)
