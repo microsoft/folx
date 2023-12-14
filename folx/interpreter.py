@@ -211,9 +211,8 @@ def forward_laplacian(
         out = eval_jaxpr_with_forward_laplacian(
             closed_jaxpr.jaxpr, closed_jaxpr.literals, *lapl_args, sparsity_threshold=threshold
         )
-        if len(out) == 1:
-            return out[0]
-        return out
+        out_structure = jtu.tree_structure(jax.eval_shape(fn, *args, **kwargs))
+        return out_structure.unflatten(out)
     
     if disable_jit:
         return wrapped
