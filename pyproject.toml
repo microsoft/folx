@@ -1,7 +1,7 @@
 [tool.poetry]
 name = 'folx'
-version = '0.2'
-description = 'forward mode laplacian for jax'
+version = '0.2.1'
+description = 'Forward Laplacian for JAX'
 authors = [
     "Nicholas Gao <n.gao@tum.de>",
     "Jonas Koehler <jonas.koehler@microsoft.com>",

@@ -156,9 +156,10 @@ def vmap_sequence(
     """
     curr_dim = 0
     maps: list[int | None] = []
-    if len(shape) > arr.ndim:
-        maps = [None] * (len(shape) - arr.ndim)
-        shape = shape[len(shape) - arr.ndim :]
+    active_dims = arr.ndim - len(skip_axes)
+    if len(shape) > active_dims:
+        maps = [None] * (len(shape) - active_dims)
+        shape = shape[len(shape) - active_dims:]
     skipped = 0
     for i in range(arr.ndim):
         if i in skip_axes:
@@ -294,7 +295,7 @@ def ravel(pytree):
         unravelled = []
         idx = 0
         for shape in shapes:
-            size = np.prod(shape)
+            size = np.prod(shape, dtype=int)
             unravelled.append(arr[idx : idx + size].reshape(shape))
             idx += size
         return tree_def.unflatten(unravelled)
