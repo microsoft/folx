@@ -58,7 +58,7 @@ def get_reduced_jacobians(*jacs: FwdJacobian, idx: Array | np.ndarray | None):
     if idx is None:
         data = [j.dense_array for j in jacs]
         data = extend_jacobians(*data, axis=JAC_DIM)
-        data = [x.reshape(x.shape[-1], -1) for x in data]
+        data = [x.reshape(x.shape[0], -1) for x in data]
     else:
         data = [j.construct_jac_for(idx) for j in jacs]
         data = [x.reshape(len(idx), -1) for x in data]

@@ -215,6 +215,9 @@ class FwdJacobian(NamedTuple):
             data=jnp.concatenate((self.data, other.data), axis=JAC_DIM),
             x0_idx=np.concatenate((self.x0_idx, other.x0_idx), axis=JAC_DIM), # type: ignore
         )
+    
+    def astype(self, dtype):
+        return FwdJacobian(self.data.astype(dtype), self.x0_idx)
 
 
 class FwdLaplArray(NamedTuple):
@@ -254,6 +257,16 @@ class FwdLaplArray(NamedTuple):
     @property
     def dense(self):
         return FwdLaplArray(self.x, self.jacobian.as_dense, self.laplacian)
+    
+    def astype(self, dtype):
+        if dtype in (jnp.float16, jnp.float32, jnp.float64, jnp.complex64, jnp.complex128):
+            return FwdLaplArray(
+                self.x.astype(dtype),
+                self.jacobian.astype(dtype),
+                self.laplacian.astype(dtype)
+            )
+        # If we convert to integer or boolean we drop the derivatives
+        return self.x.astype(dtype)
 
 
 def IS_LPL_ARR(x):
