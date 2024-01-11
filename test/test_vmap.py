@@ -18,6 +18,19 @@ class BatchedVmapTest(unittest.TestCase):
                 y_hat = batched_vmap(fn, batch_size)(x)
                 self.assertEqual(y.shape, y_hat.shape)
                 self.assertTrue(jnp.allclose(y, y_hat))
+
+    def test_uneven(self):
+        def fn(x):
+            return jnp.sin(x).sum()
+        
+        x = jax.random.normal(jax.random.PRNGKey(42), (21, 3))
+        y = jax.vmap(fn)(x)
+        
+        for batch_size in [10, 5, 1]:
+            with self.subTest(batch_size=batch_size):
+                y_hat = batched_vmap(fn, batch_size)(x)
+                self.assertEqual(y.shape, y_hat.shape)
+                self.assertTrue(jnp.allclose(y, y_hat))
     
     def test_multiple_arguments(self):
         def fn(x, y):
