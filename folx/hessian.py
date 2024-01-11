@@ -56,7 +56,6 @@ def general_jac_hessian_jac(fn: ForwardFn, args: FwdLaplArgs, materialize_idx: A
     if K > D:
         # jax.hessian uses Fwd on Reverse AD
         flat_hessian = jax.hessian(flat_fn)(flat_x)
-        # print(fn.__name__, grad_2d.shape, flat_x.shape, out.shape, flat_hessian.shape, jtu.tree_map(jnp.shape, (args, grads_2d, materialize_idx)))
         flat_out = trace_of_product(flat_hessian, grad_2d @ grad_2d.T)
     elif D > K:
         # Directly copmute the trace of tr(HJJ^T)=tr(J^THJ)
