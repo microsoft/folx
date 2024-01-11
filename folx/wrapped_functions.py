@@ -95,12 +95,7 @@ def dot_general(
 
 
 def dtype_conversion(arr: ArrayOrFwdLaplArray, *_: ArrayOrFwdLaplArray, new_dtype: DTypeLike, sparsity_threshold: int, **kwargs):
-    # we only need to keep the jacobian if it's a float type
-    if new_dtype in (jnp.float16, jnp.float32, jnp.float64, jnp.complex64, jnp.complex128):
-        return wrap_forward_laplacian(jax.lax.convert_element_type_p.bind, in_axes=())(
-            arr, new_dtype=new_dtype, sparsity_threshold=sparsity_threshold, **kwargs
-        )
-    return warp_without_fwd_laplacian(jax.lax.convert_element_type_p.bind)(arr, new_dtype=new_dtype, **kwargs)
+    return arr.astype(new_dtype)
 
 
 @jax.custom_jvp

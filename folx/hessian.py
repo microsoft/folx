@@ -41,6 +41,7 @@ def general_jac_hessian_jac(fn: ForwardFn, args: FwdLaplArgs, materialize_idx: A
     # Hessian, since we can then use einsum to compute the trace.
     flat_fn = flat_wrap(fn, *args.x)
     flat_x = jfu.ravel_pytree(args.x)[0]
+    out, unravel = jfu.ravel_pytree(fn(*args.x))
     # We have to decide on an order in which we execute tr(HJJ^T).
     # H will be of shape NxDxD, J is DxK where N could potentially be D.
     # We will do the following:
@@ -82,10 +83,6 @@ def general_jac_hessian_jac(fn: ForwardFn, args: FwdLaplArgs, materialize_idx: A
 
         HJ = hvp(grad_2d)  # N x D x K
         flat_out = trace_of_product(HJ, grad_2d)  # N x D x K and D x K
-
-    # since f(x) and nabla f(x) should have the same structure, we can use the
-    # structure of f(x) to unravel the flat_out
-    unravel = jfu.ravel_pytree(fn(*args.x))[1]
     return unravel(flat_out)
 
 
@@ -284,6 +281,7 @@ def vmapped_jac_hessian_jac(
     def hess_transform(args: FwdLaplArgs, extra_args: ExtraArgs, materialize_idx):
         def merged_fn(*x):
             return fwd(*merge(x, extra_args))
+        merged_fn.__name__ = fwd.__name__
         
         if custom_jac_hessian_jac is not None:
             result = custom_jac_hessian_jac(args, extra_args, merge, materialize_idx)

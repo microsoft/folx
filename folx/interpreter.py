@@ -1,3 +1,4 @@
+import functools
 import logging
 from collections import defaultdict
 from typing import Callable, ParamSpec, Sequence, TypeVar
@@ -11,7 +12,7 @@ from jax.util import safe_map
 
 from .api import Array, ArrayOrFwdLaplArray, FwdJacobian, FwdLaplArray, PyTree
 from .utils import extract_jacobian_mask, ravel
-from .wrapped_functions import get_laplacian
+from .wrapped_functions import get_laplacian, wrap_forward_laplacian
 
 R = TypeVar("R", bound=PyTree[Array])
 P = ParamSpec("P")
@@ -124,9 +125,15 @@ def eval_jaxpr_with_forward_laplacian(jaxpr: core.Jaxpr, consts, *args, sparsity
             sub_expr.jaxpr, sub_expr.literals, *invals, sparsity_threshold=sparsity_threshold
         )
 
+    def eval_custom_jvp(eqn: core.JaxprEqn, invals):
+        subfuns, args = eqn.primitive.get_bind_params(eqn.params)
+        fn = functools.partial(eqn.primitive.bind, *subfuns, **args)
+        return wrap_forward_laplacian(fn)(*invals, sparsity_threshold=sparsity_threshold)
+
     def eval_laplacian(eqn: core.JaxprEqn, invals):
+        subfuns, params = eqn.primitive.get_bind_params(eqn.params)
         fn = get_laplacian(eqn.primitive, True)
-        return fn(*invals, **eqn.params, sparsity_threshold=sparsity_threshold)
+        return fn(*subfuns, *invals, **params, sparsity_threshold=sparsity_threshold)
 
     for eqn in jaxpr.eqns:
         invals = env.read_many(eqn.invars)
@@ -155,6 +162,8 @@ def eval_jaxpr_with_forward_laplacian(jaxpr: core.Jaxpr, consts, *args, sparsity
             outvals = eval_scan(eqn, invals)
         elif eqn.primitive.name == "pjit":
             outvals = eval_pjit(eqn, invals)
+        elif eqn.primitive.name == "custom_jvp_call":
+            outvals = eval_custom_jvp(eqn, invals)
         else:
             outvals = eval_laplacian(eqn, invals)
 
