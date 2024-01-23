@@ -234,7 +234,7 @@ def remove_zero_entries(lapl_args: FwdLaplArgs, materialize_idx: np.ndarray | No
             x=arg.x[idx],
             jacobian=FwdJacobian(
                 data=arg.jacobian.data[(slice(None), *idx)],
-                x0_idx=arg.jacobian.x0_idx[(slice(None), *idx)], # type: ignore
+                x0_idx=arg.jacobian.x0_idx[(slice(None), *idx)] if arg.jacobian.x0_idx is not None else None,
             ),
             laplacian=arg.laplacian[idx],
         ))
