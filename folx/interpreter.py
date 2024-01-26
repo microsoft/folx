@@ -131,7 +131,7 @@ def eval_jaxpr_with_forward_laplacian(
         name = eqn.params['name']
         if fn := get_laplacian(name):
             # TODO: this is a bit incomplete, e.g., kwargs?
-            outvals = fn(*invals, sparsity_threshold=sparsity_threshold)
+            outvals = fn(invals, {}, sparsity_threshold=sparsity_threshold)
             if isinstance(outvals, (FwdLaplArray, Array)):
                 outvals = [outvals]  # TODO: Figure out how to properly handle outvals
             return outvals
@@ -148,14 +148,16 @@ def eval_jaxpr_with_forward_laplacian(
         fn = functools.partial(eqn.primitive.bind, *subfuns, **args)
         with logging_prefix(f'({summarize(eqn.source_info)})'):
             return wrap_forward_laplacian(fn)(
-                invals, sparsity_threshold=sparsity_threshold
+                invals, {}, sparsity_threshold=sparsity_threshold
             )
 
     def eval_laplacian(eqn: core.JaxprEqn, invals):
         subfuns, params = eqn.primitive.get_bind_params(eqn.params)
         fn = get_laplacian(eqn.primitive, True)
         with logging_prefix(f'({summarize(eqn.source_info)})'):
-            return fn(*subfuns, invals, params, sparsity_threshold=sparsity_threshold)
+            return fn(
+                (*subfuns, *invals), params, sparsity_threshold=sparsity_threshold
+            )
 
     for eqn in jaxpr.eqns:
         invals = env.read_many(eqn.invars)

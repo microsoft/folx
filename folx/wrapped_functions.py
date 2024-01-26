@@ -1,6 +1,6 @@
 import functools
 import logging
-from typing import Literal, ParamSpec, TypeVar, overload
+from typing import Any, Literal, ParamSpec, TypeVar, overload
 
 import jax
 import jax.numpy as jnp
@@ -42,17 +42,14 @@ def rearrange(
 
 
 def dot_general(
-    lhs: ArrayOrFwdLaplArray,
-    rhs: ArrayOrFwdLaplArray,
-    *_: ArrayOrFwdLaplArray,
-    dimension_numbers: tuple[
-        tuple[tuple[int, ...], tuple[int, ...]], tuple[tuple[int, ...], tuple[int, ...]]
-    ],
-    precision=None,
-    preferred_element_type=None,
+    args: tuple[ArrayOrFwdLaplArray, ArrayOrFwdLaplArray],
+    kwargs: dict[str, Any],
     sparsity_threshold: int = 0,
-    **__,
 ) -> ArrayOrFwdLaplArray:
+    lhs, rhs = args
+    dimension_numbers = kwargs['dimension_numbers']
+    precision = kwargs['precision']
+    preferred_element_type = kwargs['preferred_element_type']
     # If we have regular arrays just do regular dot_general
     if not isinstance(lhs, FwdLaplArray) and not isinstance(rhs, FwdLaplArray):
         return jax.lax.dot_general_p.bind(
@@ -71,20 +68,24 @@ def dot_general(
     rh_brdcast_dims = tuple(i for i in rh_dims if i not in rh_batch_dims + rh_contract)
 
     left_inp = rearrange(
-        lhs,
-        contract_dims=lh_contract,
-        batch_dims=lh_batch_dims,
-        brdcast_dims=lh_brdcast_dims,
-        other_brdcast_dims=rh_brdcast_dims,
+        (lhs,),
+        dict(
+            contract_dims=lh_contract,
+            batch_dims=lh_batch_dims,
+            brdcast_dims=lh_brdcast_dims,
+            other_brdcast_dims=rh_brdcast_dims,
+        ),
         sparsity_threshold=sparsity_threshold,
     )
     right_inp = rearrange(
-        rhs,
-        contract_dims=rh_contract,
-        batch_dims=rh_batch_dims,
-        brdcast_dims=rh_brdcast_dims,
-        other_brdcast_dims=lh_brdcast_dims,
-        rhs=True,
+        (rhs,),
+        dict(
+            contract_dims=rh_contract,
+            batch_dims=rh_batch_dims,
+            brdcast_dims=rh_brdcast_dims,
+            other_brdcast_dims=lh_brdcast_dims,
+            rhs=True,
+        ),
         sparsity_threshold=sparsity_threshold,
     )
 
@@ -103,7 +104,7 @@ def dot_general(
 
     result = wrap_forward_laplacian(
         dot_last, flags=FunctionFlags.DOT_PRODUCT | FunctionFlags.JOIN_JVP, in_axes=-1
-    )((left_inp, right_inp), sparsity_threshold=sparsity_threshold)
+    )((left_inp, right_inp), {}, sparsity_threshold=sparsity_threshold)
     return result
 
 
@@ -151,14 +152,16 @@ slogdet.defjvp(slogdet_jvp)
 
 
 def slogdet_wrapper(
-    x: ArrayOrFwdLaplArray, *_: ArrayOrFwdLaplArray, sparsity_threshold: int, **__
+    x: tuple[ArrayOrFwdLaplArray],
+    kwargs: dict[str, Any],
+    sparsity_threshold: int,
 ):
     fwd_lapl_fn = wrap_forward_laplacian(
         slogdet, custom_jac_hessian_jac=slogdet_jac_hessian_jac
     )
-    sign, logdet = fwd_lapl_fn((x,), sparsity_threshold=0)
+    sign, logdet = fwd_lapl_fn(x, {}, sparsity_threshold=0)
     # Remove the jacobian of the sign
-    sign = warp_without_fwd_laplacian(lambda x: x)(sign, sparsity_threshold=0)
+    sign = warp_without_fwd_laplacian(lambda x: x)((sign,), {}, sparsity_threshold=0)
     return sign, logdet
 
 
