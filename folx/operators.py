@@ -9,11 +9,11 @@ from .interpreter import forward_laplacian
 
 
 __all__ = [
-    "Laplacian",
-    "LaplacianOperator",
-    "ForwardLaplacianOperator",
-    "LoopLaplacianOperator",
-    "ParallelLaplacianOperator",
+    'Laplacian',
+    'LaplacianOperator',
+    'ForwardLaplacianOperator',
+    'LoopLaplacianOperator',
+    'ParallelLaplacianOperator',
 ]
 
 
@@ -37,6 +37,7 @@ class ForwardLaplacianOperator(LaplacianOperator):
         def lap(x: Array):
             result = fwd_lapl(x)
             return result.laplacian, result.jacobian.dense_array
+
         return lap
 
 
@@ -51,8 +52,11 @@ class LoopLaplacianOperator(LaplacianOperator):
             grad_f = jax.grad(f)
             jacobian, dgrad_f = jax.linearize(grad_f, x)
 
-            _, laplacian = jax.lax.scan(lambda i, _: (i + 1, dgrad_f(eye[i])[i]), 0, None, length=n)
+            _, laplacian = jax.lax.scan(
+                lambda i, _: (i + 1, dgrad_f(eye[i])[i]), 0, None, length=n
+            )
             return laplacian, jacobian
+
         return laplacian
 
 
@@ -69,4 +73,5 @@ class ParallelLaplacianOperator(LaplacianOperator):
 
             laplacian = jnp.diagonal(jax.vmap(dgrad_f)(eye))
             return laplacian, jacobian
+
         return laplacian

@@ -8,8 +8,8 @@ import numpy.typing as npt
 from jax import core
 from jaxtyping import Array, PyTree
 
-T = TypeVar("T", bound=PyTree[Array])
-R = TypeVar("R", bound=PyTree[Array])
+T = TypeVar('T', bound=PyTree[Array])
+R = TypeVar('R', bound=PyTree[Array])
 
 ExtraArgs = tuple[Array, ...]
 Arrays = tuple[Array, ...]
@@ -91,10 +91,12 @@ class FwdJacobian(NamedTuple):
 
         x_shape = (*x.shape[: len(indexed_axes)], -1, *x.shape[len(indexed_axes) + 1 :])
         x = x.reshape(
-            np.prod(x.shape[: len(indexed_axes)], dtype=int), *x.shape[len(indexed_axes) :]
+            np.prod(x.shape[: len(indexed_axes)], dtype=int),
+            *x.shape[len(indexed_axes) :],
         )
         idx = idx.reshape(
-            np.prod(idx.shape[: len(indexed_axes)], dtype=int), *idx.shape[len(indexed_axes) :]
+            np.prod(idx.shape[: len(indexed_axes)], dtype=int),
+            *idx.shape[len(indexed_axes) :],
         )
 
         @jax.vmap
@@ -163,7 +165,7 @@ class FwdJacobian(NamedTuple):
             return self.data
         ext_idx = (..., *((None,) * len(self.data_shape)))  # this is for mypy
         return self.construct_jac_for(np.arange(self.max_n + 1)[ext_idx])
-    
+
     @property
     def max_n(self) -> int:
         if self.x0_idx is not None:
@@ -201,21 +203,25 @@ class FwdJacobian(NamedTuple):
     @classmethod
     def from_dense(cls, array):
         return cls(array, None)
-    
+
     def __add__(self, other):
         assert isinstance(other, FwdJacobian)
         # If any is not weak we just add dense jacobians
         if not self.weak or not other.weak:
             from .utils import add_jacobians
+
             return FwdJacobian(add_jacobians(self.as_dense.data, other.as_dense.data))
         # If both are weak, we can keep them sparse
         if (other.x0_idx == self.x0_idx).all():
-            return FwdJacobian(self.data + other.data, np.broadcast_arrays(self.x0_idx, other.x0_idx)[0]) # type: ignore
+            return FwdJacobian(
+                self.data + other.data,
+                np.broadcast_arrays(self.x0_idx, other.x0_idx)[0],
+            )  # type: ignore
         return FwdJacobian(
             data=jnp.concatenate((self.data, other.data), axis=JAC_DIM),
-            x0_idx=np.concatenate((self.x0_idx, other.x0_idx), axis=JAC_DIM), # type: ignore
+            x0_idx=np.concatenate((self.x0_idx, other.x0_idx), axis=JAC_DIM),  # type: ignore
         )
-    
+
     def astype(self, dtype):
         return FwdJacobian(self.data.astype(dtype), self.x0_idx)
 
@@ -257,13 +263,19 @@ class FwdLaplArray(NamedTuple):
     @property
     def dense(self):
         return FwdLaplArray(self.x, self.jacobian.as_dense, self.laplacian)
-    
+
     def astype(self, dtype):
-        if dtype in (jnp.float16, jnp.float32, jnp.float64, jnp.complex64, jnp.complex128):
+        if dtype in (
+            jnp.float16,
+            jnp.float32,
+            jnp.float64,
+            jnp.complex64,
+            jnp.complex128,
+        ):
             return FwdLaplArray(
                 self.x.astype(dtype),
                 self.jacobian.astype(dtype),
-                self.laplacian.astype(dtype)
+                self.laplacian.astype(dtype),
             )
         # If we convert to integer or boolean we drop the derivatives
         return self.x.astype(dtype)
@@ -332,7 +344,10 @@ class FwdLaplArgs(NamedTuple):
             tuple(
                 jacobians[j]
                 if i == j
-                else jnp.zeros((jacobians[i].shape[0], *jacobians[j].shape[1:]), dtype=jacobians[j].dtype)
+                else jnp.zeros(
+                    (jacobians[i].shape[0], *jacobians[j].shape[1:]),
+                    dtype=jacobians[j].dtype,
+                )
                 for j in range(len(jacobians))
             )
             for i in range(len(jacobians))
@@ -355,7 +370,9 @@ class MergeFn(Protocol):
 
 class ForwardLaplacianFns(NamedTuple):
     forward: ForwardFn
-    jvp: Callable[[FwdLaplArgs, dict[str, Any]], tuple[ArrayOrArrays, FwdJacobian, ArrayOrArrays]]
+    jvp: Callable[
+        [FwdLaplArgs, dict[str, Any]], tuple[ArrayOrArrays, FwdJacobian, ArrayOrArrays]
+    ]
     jac_hessian_jac_trace: Callable[[FwdLaplArgs, int], ArrayOrArrays]
 
 
@@ -365,12 +382,23 @@ class JvpFn(Protocol):
 
 
 class CustomTraceJacHessianJac(Protocol):
-    def __call__(self, args: FwdLaplArgs, extra_args: ExtraArgs, merge: MergeFn, materialize_idx: Array) -> PyTree[Array]:
+    def __call__(
+        self,
+        args: FwdLaplArgs,
+        extra_args: ExtraArgs,
+        merge: MergeFn,
+        materialize_idx: Array,
+    ) -> PyTree[Array]:
         ...
 
 
 class ForwardLaplacian(Protocol):
-    def __call__(self, args: tuple[ArrayOrFwdLaplArray], kwargs: dict[str, Any], sparsity_threshold: int) -> PyTree[ArrayOrFwdLaplArray]:
+    def __call__(
+        self,
+        args: tuple[ArrayOrFwdLaplArray],
+        kwargs: dict[str, Any],
+        sparsity_threshold: int,
+    ) -> PyTree[ArrayOrFwdLaplArray]:
         ...
 
 

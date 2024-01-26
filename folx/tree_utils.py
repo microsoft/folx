@@ -6,7 +6,7 @@ import jax.tree_util as jtu
 
 from jaxtyping import PyTree, ArrayLike, Array
 
-T = TypeVar("T", bound=PyTree[ArrayLike])
+T = TypeVar('T', bound=PyTree[ArrayLike])
 
 
 def tree_scale(tree: T, x: ArrayLike) -> T:
@@ -34,7 +34,9 @@ def tree_sub(tree1: T, tree2: T) -> T:
 
 
 def tree_dot(a: T, b: T) -> Array:
-    return jtu.tree_reduce(jnp.add, jtu.tree_map(jnp.sum, jax.tree_map(jax.lax.mul, a, b)))
+    return jtu.tree_reduce(
+        jnp.add, jtu.tree_map(jnp.sum, jax.tree_map(jax.lax.mul, a, b))
+    )
 
 
 def tree_sum(tree: PyTree[ArrayLike]) -> Array:
@@ -43,8 +45,7 @@ def tree_sum(tree: PyTree[ArrayLike]) -> Array:
 
 def tree_squared_norm(tree: PyTree[ArrayLike]) -> Array:
     return jtu.tree_reduce(
-        jnp.add,
-        jtu.tree_map(lambda x: jnp.einsum('...,...->', x, x), tree)
+        jnp.add, jtu.tree_map(lambda x: jnp.einsum('...,...->', x, x), tree)
     )
 
 
@@ -78,4 +79,5 @@ def tree_take(tree: T, idx, axis) -> T:
             slices[axis] = idx
             return x[tuple(slices)]
         return jnp.take(x, indices, axis)
+
     return jtu.tree_map(take, tree)

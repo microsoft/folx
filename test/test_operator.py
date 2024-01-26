@@ -13,6 +13,7 @@ def brute_force_laplacian(fn):
         H = jax.hessian(fn)(x)
         f = jax.grad(fn)(x)
         return jnp.trace(H), f
+
     return laplacian
 
 
@@ -32,7 +33,7 @@ def test_dense_forward_laplacian():
     bf_lapl = brute_force_laplacian(fn)
     fwd_lapl = ForwardLaplacianOperator(0)(fn)
     fwd_lapl_sparse = ForwardLaplacianOperator(0.75)(fn)
-    
+
     key, subkey = jax.random.split(key)
     x = jax.random.normal(subkey, (8,))
     fwd_lapl, fwd_qf = fwd_lapl(x)
@@ -61,7 +62,7 @@ def test_sparse_forward_laplacian():
     bf_lapl = brute_force_laplacian(fn)
     fwd_lapl = ForwardLaplacianOperator(0)(fn)
     fwd_lapl_sparse = ForwardLaplacianOperator(0.75)(fn)
-    
+
     key, subkey = jax.random.split(key)
     x = jax.random.normal(subkey, (10, 8)).reshape(-1)
     fwd_lapl, fwd_qf = fwd_lapl(x)

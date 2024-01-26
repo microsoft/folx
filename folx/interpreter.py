@@ -15,8 +15,8 @@ from .api import Array, ArrayOrFwdLaplArray, FwdJacobian, FwdLaplArray, PyTree
 from .utils import extract_jacobian_mask, logging_prefix, ravel
 from .wrapped_functions import get_laplacian, wrap_forward_laplacian
 
-R = TypeVar("R", bound=PyTree[Array])
-P = ParamSpec("P")
+R = TypeVar('R', bound=PyTree[Array])
+P = ParamSpec('P')
 
 
 class JaxExprEnvironment:
@@ -25,7 +25,9 @@ class JaxExprEnvironment:
     env: dict[core.Var, ArrayOrFwdLaplArray]
     reference_counter: dict[core.Var, int]
 
-    def __init__(self, jaxpr: core.Jaxpr, consts: Sequence[Array], *args: ArrayOrFwdLaplArray):
+    def __init__(
+        self, jaxpr: core.Jaxpr, consts: Sequence[Array], *args: ArrayOrFwdLaplArray
+    ):
         self.env = {}
         self.reference_counter = defaultdict(int)
         for v in jaxpr.invars + jaxpr.constvars:
@@ -66,15 +68,24 @@ class JaxExprEnvironment:
         return safe_map(self.write, vars, vals)
 
 
-def eval_jaxpr_with_forward_laplacian(jaxpr: core.Jaxpr, consts, *args, sparsity_threshold: int):
+def eval_jaxpr_with_forward_laplacian(
+    jaxpr: core.Jaxpr, consts, *args, sparsity_threshold: int
+):
     enable_sparsity = sparsity_threshold > 0
     env = JaxExprEnvironment(jaxpr, consts, *args)
 
     def eval_scan(eqn: core.JaxprEqn, invals):
-        n_carry, n_const = eqn.params["num_carry"], eqn.params["num_consts"]
-        in_const, in_carry, in_inp = invals[:n_const], invals[n_const:n_carry+n_const], invals[n_const+n_carry:]
+        n_carry, n_const = eqn.params['num_carry'], eqn.params['num_consts']
+        in_const, in_carry, in_inp = (
+            invals[:n_const],
+            invals[n_const : n_carry + n_const],
+            invals[n_const + n_carry :],
+        )
         carry_merge = extract_jacobian_mask(in_carry)
-        assert all(isinstance(x, Array) for x in in_inp), "Scan does not support scanning over input depenedent tensors.\nPlease unroll the loop."
+        assert all(
+            isinstance(x, Array) for x in in_inp
+        ), 'Scan does not support scanning over input depenedent tensors.\nPlease unroll the loop.'
+
         def wrapped(carry, x):
             result = eval_jaxpr_with_forward_laplacian(
                 eqn.params['jaxpr'].jaxpr,
@@ -82,19 +93,20 @@ def eval_jaxpr_with_forward_laplacian(jaxpr: core.Jaxpr, consts, *args, sparsity
                 *in_const,
                 *carry_merge(carry),
                 *x,
-                sparsity_threshold=sparsity_threshold
+                sparsity_threshold=sparsity_threshold,
             )
             return result[:n_carry], result[n_carry:]
+
         first_carry, first_y = wrapped(in_carry, jtu.tree_map(lambda x: x[0], in_inp))
         # Check whether jacobian sparsity matches
         for a, b in zip(in_carry, first_carry):
             if type(a) != type(b):
-                raise TypeError(f"Type mismatch in scan: {type(a)} != {type(b)}")
+                raise TypeError(f'Type mismatch in scan: {type(a)} != {type(b)}')
             if isinstance(a, FwdLaplArray):
-                if not np.all(a.jacobian.x0_idx == b.jacobian.x0_idx): # type: ignore
-                    raise ValueError("Jacobian sparsity mismatch in scan.")
+                if not np.all(a.jacobian.x0_idx == b.jacobian.x0_idx):  # type: ignore
+                    raise ValueError('Jacobian sparsity mismatch in scan.')
         carry, y = jax.lax.scan(
-            wrapped, # type: ignore
+            wrapped,  # type: ignore
             in_carry,
             in_inp,
             length=eqn.params['length'],
@@ -102,40 +114,47 @@ def eval_jaxpr_with_forward_laplacian(jaxpr: core.Jaxpr, consts, *args, sparsity
             unroll=eqn.params['unroll'],
         )
         carry = [
-            a._replace(jacobian=a.jacobian._replace(x0_idx=b.jacobian.x0_idx)) # type: ignore
-            if isinstance(a, FwdLaplArray) else a
+            a._replace(jacobian=a.jacobian._replace(x0_idx=b.jacobian.x0_idx))  # type: ignore
+            if isinstance(a, FwdLaplArray)
+            else a
             for a, b in zip(carry, first_carry)
         ]
         y = [
-            a._replace(jacobian=a.jacobian._replace(x0_idx=b.jacobian.x0_idx)) # type: ignore
-            if isinstance(a, FwdLaplArray) else a
+            a._replace(jacobian=a.jacobian._replace(x0_idx=b.jacobian.x0_idx))  # type: ignore
+            if isinstance(a, FwdLaplArray)
+            else a
             for a, b in zip(y, first_y)
         ]
         return *carry, *y
 
     def eval_pjit(eqn: core.JaxprEqn, invals):
-        name = eqn.params["name"]
+        name = eqn.params['name']
         if fn := get_laplacian(name):
             # TODO: this is a bit incomplete, e.g., kwargs?
             outvals = fn(*invals, sparsity_threshold=sparsity_threshold)
             if isinstance(outvals, (FwdLaplArray, Array)):
                 outvals = [outvals]  # TODO: Figure out how to properly handle outvals
             return outvals
-        sub_expr: core.ClosedJaxpr = eqn.params["jaxpr"]
+        sub_expr: core.ClosedJaxpr = eqn.params['jaxpr']
         return eval_jaxpr_with_forward_laplacian(
-            sub_expr.jaxpr, sub_expr.literals, *invals, sparsity_threshold=sparsity_threshold
+            sub_expr.jaxpr,
+            sub_expr.literals,
+            *invals,
+            sparsity_threshold=sparsity_threshold,
         )
 
     def eval_custom_jvp(eqn: core.JaxprEqn, invals):
         subfuns, args = eqn.primitive.get_bind_params(eqn.params)
         fn = functools.partial(eqn.primitive.bind, *subfuns, **args)
-        with logging_prefix(f"({summarize(eqn.source_info)})"):
-            return wrap_forward_laplacian(fn)(invals, sparsity_threshold=sparsity_threshold)
+        with logging_prefix(f'({summarize(eqn.source_info)})'):
+            return wrap_forward_laplacian(fn)(
+                invals, sparsity_threshold=sparsity_threshold
+            )
 
     def eval_laplacian(eqn: core.JaxprEqn, invals):
         subfuns, params = eqn.primitive.get_bind_params(eqn.params)
         fn = get_laplacian(eqn.primitive, True)
-        with logging_prefix(f"({summarize(eqn.source_info)})"):
+        with logging_prefix(f'({summarize(eqn.source_info)})'):
             return fn(*subfuns, invals, params, sparsity_threshold=sparsity_threshold)
 
     for eqn in jaxpr.eqns:
@@ -154,18 +173,18 @@ def eval_jaxpr_with_forward_laplacian(jaxpr: core.Jaxpr, consts, *args, sparsity
                         outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
                 except Exception as e:
                     logging.warning(
-                        f"Could not perform operation {eqn.primitive.name} in eager execution despite it only depending on non-input dependent values. "
-                        "We switch to tracing rather than eager execution. This may impact sparsity propagation.\n"
-                        f"{e}"
+                        f'Could not perform operation {eqn.primitive.name} in eager execution despite it only depending on non-input dependent values. '
+                        'We switch to tracing rather than eager execution. This may impact sparsity propagation.\n'
+                        f'{e}'
                     )
                     outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
             else:
                 outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
-        elif eqn.primitive.name == "scan":
+        elif eqn.primitive.name == 'scan':
             outvals = eval_scan(eqn, invals)
-        elif eqn.primitive.name == "pjit":
+        elif eqn.primitive.name == 'pjit':
             outvals = eval_pjit(eqn, invals)
-        elif eqn.primitive.name == "custom_jvp_call":
+        elif eqn.primitive.name == 'custom_jvp_call':
             outvals = eval_custom_jvp(eqn, invals)
         else:
             outvals = eval_laplacian(eqn, invals)
@@ -178,8 +197,9 @@ def eval_jaxpr_with_forward_laplacian(jaxpr: core.Jaxpr, consts, *args, sparsity
     return env.read_many(jaxpr.outvars)
 
 
-
-def init_forward_laplacian_state(*x: PyTree[Array], sparsity: bool) -> PyTree[FwdLaplArray]:
+def init_forward_laplacian_state(
+    *x: PyTree[Array], sparsity: bool
+) -> PyTree[FwdLaplArray]:
     """
     Initialize forward Laplacian state from a PyTree of arrays.
     """
@@ -187,7 +207,9 @@ def init_forward_laplacian_state(*x: PyTree[Array], sparsity: bool) -> PyTree[Fw
     jac = jtu.tree_map(jnp.ones_like, x)
     jac_idx = unravel(np.arange(x_flat.shape[0]))
     if sparsity:
-        jac = jtu.tree_map(lambda j, i: FwdJacobian(j[None], np.array(i)[None]), jac, jac_idx)
+        jac = jtu.tree_map(
+            lambda j, i: FwdJacobian(j[None], np.array(i)[None]), jac, jac_idx
+        )
     else:
         jac = jax.vmap(unravel)(jnp.eye(len(x_flat)))
         jac = jtu.tree_map(FwdJacobian.from_dense, jac)
@@ -198,7 +220,7 @@ def init_forward_laplacian_state(*x: PyTree[Array], sparsity: bool) -> PyTree[Fw
 def forward_laplacian(
     fn: Callable[P, PyTree[Array]],
     sparsity_threshold: int | float = 0,
-    disable_jit: bool = False
+    disable_jit: bool = False,
 ) -> Callable[P, PyTree[FwdLaplArray]]:
     """
     This function takes a function and returns a function that computes the Laplacian of the function.
@@ -212,6 +234,7 @@ def forward_laplacian(
             If the value is larger than 1, it will be interpreted as an absolute number of elements.
             If enabling sparsity, we recommend relatively large values like 0.6 as frequent materializations are slow.
     """
+
     def wrapped(*args: P.args, **kwargs: P.kwargs):
         closed_jaxpr = jax.make_jaxpr(fn)(*args, **kwargs)
         flat_args = jtu.tree_leaves(args)
@@ -221,12 +244,15 @@ def forward_laplacian(
             threshold = int(sparsity_threshold)
         lapl_args = init_forward_laplacian_state(*flat_args, sparsity=threshold > 0)
         out = eval_jaxpr_with_forward_laplacian(
-            closed_jaxpr.jaxpr, closed_jaxpr.literals, *lapl_args, sparsity_threshold=threshold
+            closed_jaxpr.jaxpr,
+            closed_jaxpr.literals,
+            *lapl_args,
+            sparsity_threshold=threshold,
         )
         out_structure = jtu.tree_structure(jax.eval_shape(fn, *args, **kwargs))
         return out_structure.unflatten(out)
-    
+
     if disable_jit:
         return wrapped
 
-    return jax.jit(wrapped) # type: ignore
+    return jax.jit(wrapped)  # type: ignore

@@ -24,8 +24,8 @@ from .jvp import get_jvp_function
 from .tree_utils import tree_add
 from .utils import split_args
 
-R = TypeVar("R", bound=PyTree[Array])
-P = ParamSpec("P")
+R = TypeVar('R', bound=PyTree[Array])
+P = ParamSpec('P')
 
 
 def construct_fwd_laplacian_functions(
@@ -73,7 +73,7 @@ def wrap_forward_laplacian(
     flags: FunctionFlags = FunctionFlags.GENERAL,
     name: str | None = None,
     index_static_args: tuple | slice | None = None,
-    custom_jac_hessian_jac: CustomTraceJacHessianJac | None = None
+    custom_jac_hessian_jac: CustomTraceJacHessianJac | None = None,
 ) -> ForwardLaplacian:
     """
     Add forward Laplacian functionality to a function.
@@ -97,7 +97,7 @@ def wrap_forward_laplacian(
 
         # construct operation
         partial_fn = functools.partial(fn, **kwargs)
-        setattr(partial_fn, "__name__", name or getattr(fn, "__name__", "partial"))
+        setattr(partial_fn, '__name__', name or getattr(fn, '__name__', 'partial'))
         lapl_fns = construct_fwd_laplacian_functions(
             partial_fn,
             flags,
@@ -117,7 +117,9 @@ def wrap_forward_laplacian(
         # Actually update Laplacian state
         laplace_args = FwdLaplArgs(lapl_args)
         y, grad_y, lapl_y = lapl_fns.jvp(laplace_args, kwargs)
-        lapl_y = tree_add(lapl_y, lapl_fns.jac_hessian_jac_trace(laplace_args, sparsity_threshold))
+        lapl_y = tree_add(
+            lapl_y, lapl_fns.jac_hessian_jac_trace(laplace_args, sparsity_threshold)
+        )
         return jax.tree_util.tree_map(FwdLaplArray, y, grad_y, lapl_y)
 
     return new_fn
@@ -127,6 +129,7 @@ def warp_without_fwd_laplacian(fn) -> ForwardLaplacian:
     """
     Decorator that removes the Laplacian state from the arguments of a function.
     """
+
     def wrapped(args, kwargs, sparsity_threshold: int):
         args, kwargs = jax.tree_util.tree_map(
             lambda a: (a.x if isinstance(a, FwdLaplArray) else a),

@@ -1,4 +1,3 @@
-
 import logging
 from contextlib import contextmanager
 from typing import Sequence, Type, TypeVar
@@ -25,7 +24,7 @@ from .api import (
     PyTree,
 )
 
-T = TypeVar("T")
+T = TypeVar('T')
 
 
 def bound_axis(arr: np.ndarray, axis):
@@ -50,7 +49,7 @@ def trace_of_product(mat1: Array, mat2: Array):
     """
     # ij,ij->... is a faster way to compute the trace than tr(mat1@mat2)
     # since one can rewrite the trace as sum_ij mat1_ij * mat2_ij
-    return jnp.einsum("...ij,...ij->...", mat1, mat2)
+    return jnp.einsum('...ij,...ij->...', mat1, mat2)
 
 
 def get_reduced_jacobians(*jacs: FwdJacobian, idx: Array | np.ndarray | None):
@@ -68,7 +67,9 @@ def get_reduced_jacobians(*jacs: FwdJacobian, idx: Array | np.ndarray | None):
     return data
 
 
-def trace_jac_jacT(first: FwdJacobian, other: FwdJacobian, idx: Array | np.ndarray | None):
+def trace_jac_jacT(
+    first: FwdJacobian, other: FwdJacobian, idx: Array | np.ndarray | None
+):
     """
     Computes the trace of the product of the given jacobians.
     """
@@ -113,7 +114,9 @@ def array_wise_flat_wrap(fn: ForwardFn, *x: Array):
     return new_fn
 
 
-def broadcast_shapes_to_args(args: PyTree[ArrayOrFwdLaplArray], axes: PyTree[Axes]) -> PyTree[Axes]:
+def broadcast_shapes_to_args(
+    args: PyTree[ArrayOrFwdLaplArray], axes: PyTree[Axes]
+) -> PyTree[Axes]:
     """
     Broadcasts the given axes to the given pytree of arrays.
     This is intended to replicate the broadcasting behavior of jax.vmap or jax.pmap.
@@ -137,7 +140,9 @@ def broadcast_shapes_to_args(args: PyTree[ArrayOrFwdLaplArray], axes: PyTree[Axe
             inp = tuple(range(x.ndim))
         n_dim = x.ndim
         inp = tuple(i if i >= 0 else i + n_dim for i in inp)
-        assert max(*inp, -1, -1) < n_dim, f"axes {inp} out of bounds for array of shape {x.shape}"
+        assert (
+            max(*inp, -1, -1) < n_dim
+        ), f'axes {inp} out of bounds for array of shape {x.shape}'
         return inp
 
     flat_axes, tree_def = jtu.tree_flatten(axes, is_leaf=is_axes_def)
@@ -162,7 +167,7 @@ def vmap_sequence(
     active_dims = arr.ndim - len(skip_axes)
     if len(shape) > active_dims:
         maps = [None] * (len(shape) - active_dims)
-        shape = shape[len(shape) - active_dims:]
+        shape = shape[len(shape) - active_dims :]
     skipped = 0
     for i in range(arr.ndim):
         if i in skip_axes:
@@ -204,7 +209,9 @@ def vmap_sequences(arrs: PyTree[Array], in_axes: Axes) -> list[PyTree[Axes]]:
     brdcast_shape = jnp.broadcast_shapes(*tree_shapes(reduced_arrs))
     flat_arrs, tree_def = jtu.tree_flatten(arrs)
     in_axes = tree_def.flatten_up_to(in_axes)
-    maps = [vmap_sequence(arr, brdcast_shape, ax) for arr, ax in zip(flat_arrs, in_axes)]
+    maps = [
+        vmap_sequence(arr, brdcast_shape, ax) for arr, ax in zip(flat_arrs, in_axes)
+    ]
     keep_idx = []
     for i in range(len(brdcast_shape)):
         if any(m[i] is not None for m in maps):
@@ -267,7 +274,9 @@ def split_args(
     """
     brd_axes = broadcast_shapes_to_args(args, in_axes)
     leaves, tree_def = jtu.tree_flatten(
-        args, is_leaf=lambda x: isinstance(x, filter_type) or not isinstance(x, (dict, list, tuple))
+        args,
+        is_leaf=lambda x: isinstance(x, filter_type)
+        or not isinstance(x, (dict, list, tuple)),
     )
     flat_axes = tree_def.flatten_up_to(brd_axes)
 
@@ -280,7 +289,9 @@ def split_args(
     def merge(args: Arrays, extra: ExtraArgs) -> Arrays:
         x_iter = iter(args)
         y_iter = iter(extra)
-        return jtu.tree_unflatten(tree_def, [(next(x_iter) if m else next(y_iter)) for m in mask])
+        return jtu.tree_unflatten(
+            tree_def, [(next(x_iter) if m else next(y_iter)) for m in mask]
+        )
 
     return (args, args_in_axes, extra_args, extra_in_axes, merge)
 
@@ -341,7 +352,7 @@ def broadcast_except(arrs, axis):
         broadcast = np.broadcast_to if isinstance(a, np.ndarray) else jnp.broadcast_to
         moveaxis = np.moveaxis if isinstance(a, np.ndarray) else jnp.moveaxis
         out = broadcast(moveaxis(a, axis, -1), (*max_pre, *max_post, a.shape[axis]))
-        return moveaxis(out, -1, axis) # type: ignore
+        return moveaxis(out, -1, axis)  # type: ignore
 
     return jtu.tree_map(broadcast, arrs)
 
@@ -382,7 +393,11 @@ def broadcast_dim(xs: Sequence[np.ndarray] | Sequence[Array], fill_value, axis):
                 [
                     x,
                     np.full(
-                        (*x.shape[:axis], max_dim - x.shape[axis], *x.shape[axis + 1 :]),
+                        (
+                            *x.shape[:axis],
+                            max_dim - x.shape[axis],
+                            *x.shape[axis + 1 :],
+                        ),
                         fill_value,
                         dtype=x.dtype,
                     ),
@@ -431,7 +446,9 @@ def get_jacobian_for_reduction(jacs: Sequence[FwdJacobian], axes):
     # Match shapes for masks
     masks = broadcast_except(tuple(map(lambda x: x.mask, jacs)), axis=JAC_DIM)
     # Compute a bunch of shapes and sizes
-    reduction_shapes = tuple(tuple(np.array(m.shape[1:])[a]) for a, m in zip(axes, masks))
+    reduction_shapes = tuple(
+        tuple(np.array(m.shape[1:])[a]) for a, m in zip(axes, masks)
+    )
     assert all(len(reduction_shapes[0]) == len(s) for s in reduction_shapes)
     reduction_size = np.prod(reduction_shapes[0], dtype=int)
 
@@ -439,14 +456,17 @@ def get_jacobian_for_reduction(jacs: Sequence[FwdJacobian], axes):
         (*[x + int(x >= JAC_DIM) for x in a], JAC_DIM)
         for a in axes  # the first dim is the same for all arrays
     )
-    kept_axes = tuple(np.setdiff1d(np.arange(masks[0].ndim), a) for a in jac_reduced_axes)
+    kept_axes = tuple(
+        np.setdiff1d(np.arange(masks[0].ndim), a) for a in jac_reduced_axes
+    )
     kept_shapes = tuple(tuple(np.array(m.shape)[a]) for a, m in zip(kept_axes, masks))
     assert all(kept_shapes[0] == s for s in kept_shapes)
     kept_shape = kept_shapes[0]
     kept_size = np.prod(kept_shape, dtype=int)
 
     inv_orders = tuple(
-        tuple(np.argsort((*kept_axes[i], *jac_reduced_axes[i]))) for i in range(len(jacs))
+        tuple(np.argsort((*kept_axes[i], *jac_reduced_axes[i])))
+        for i in range(len(jacs))
     )
 
     # Let's rearrange masks and data such that all batch dimensions are reduced
@@ -481,7 +501,8 @@ def get_jacobian_for_reduction(jacs: Sequence[FwdJacobian], axes):
     # Let's reconstruct the original order for the output mask
     out_masks = tuple(
         np.transpose(
-            out_mask.reshape(*kept_shape, *([1] * len(reduction_shapes[0])), -1), inv_order
+            out_mask.reshape(*kept_shape, *([1] * len(reduction_shapes[0])), -1),
+            inv_order,
         )
         for inv_order in inv_orders
     )
@@ -512,11 +533,13 @@ def extract_jacobian_mask(arrays: Sequence[ArrayOrFwdLaplArray]):
     for arr in arrays:
         if isinstance(arr, FwdLaplArray):
             indices.append(arr.jacobian.x0_idx)
-    
+
     def merge(arrs: ArrayOrFwdLaplArray):
         idx_iter = iter(indices)
         return [
-            arr._replace(jacobian=arr.jacobian._replace(x0_idx=next(idx_iter))) if isinstance(arr, FwdLaplArray) else arr
+            arr._replace(jacobian=arr.jacobian._replace(x0_idx=next(idx_iter)))
+            if isinstance(arr, FwdLaplArray)
+            else arr
             for arr in arrs
         ]
 
@@ -527,7 +550,7 @@ def extract_jacobian_mask(arrays: Sequence[ArrayOrFwdLaplArray]):
 def logging_prefix(prefix: str):
     class CustomFormatter(logging.Formatter):
         def format(self, record):
-            record.msg = f"{record.levelname}:[folx]{prefix} - {record.msg}"
+            record.msg = f'{record.levelname}:[folx]{prefix} - {record.msg}'
             return super().format(record)
 
     logger = logging.getLogger()

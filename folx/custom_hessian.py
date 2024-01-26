@@ -1,17 +1,16 @@
 import jax
 import jax.numpy as jnp
 
-from .api import (
-    Array,
-    ExtraArgs,
-    FwdLaplArgs,
-    MergeFn,
-    JAC_DIM
-)
+from .api import Array, ExtraArgs, FwdLaplArgs, MergeFn, JAC_DIM
 from .utils import trace_of_product
 
 
-def slogdet_jac_hessian_jac(args: FwdLaplArgs, extra_args: ExtraArgs, merge: MergeFn, materialize_idx: Array | None):
+def slogdet_jac_hessian_jac(
+    args: FwdLaplArgs,
+    extra_args: ExtraArgs,
+    merge: MergeFn,
+    materialize_idx: Array | None,
+):
     # For slogdet we know how to compute the determinant faster.
     # We can use the fact that the jacobian of logdet is A^-1.
     # Thus, the hessian is A^-1 (x) A^-T. Where (x) is the kronecker product.
@@ -40,9 +39,10 @@ def slogdet_jac_hessian_jac(args: FwdLaplArgs, extra_args: ExtraArgs, merge: Mer
         # trace = jnp.trace(vHv)
 
         # We can do better and compute the trace more efficiently.
-        A_inv_J = jnp.einsum("ij,jdk->idk", A_inv, J)
+        A_inv_J = jnp.einsum('ij,jdk->idk', A_inv, J)
         trace = -trace_of_product(
-            jnp.transpose(A_inv_J, (1, 0, 2)).reshape(-1, x0_dim), A_inv_J.reshape(-1, x0_dim)
+            jnp.transpose(A_inv_J, (1, 0, 2)).reshape(-1, x0_dim),
+            A_inv_J.reshape(-1, x0_dim),
         )
         return jnp.zeros(()), trace
 
