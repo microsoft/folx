@@ -370,7 +370,7 @@ class CustomTraceJacHessianJac(Protocol):
 
 
 class ForwardLaplacian(Protocol):
-    def __call__(self, *args: ArrayOrFwdLaplArray, sparsity_threshold: int , **kwargs) -> PyTree[ArrayOrFwdLaplArray]:
+    def __call__(self, args: tuple[ArrayOrFwdLaplArray], kwargs: dict[str, Any], sparsity_threshold: int) -> PyTree[ArrayOrFwdLaplArray]:
         ...
 
 

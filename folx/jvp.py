@@ -1,6 +1,5 @@
 import functools
 import logging
-from multiprocessing import Value
 from typing import TypeVar
 
 import jax
@@ -43,7 +42,7 @@ def sparse_jvp(
     kwargs,
     sparsity_threshold: int,
     flags: FunctionFlags,
-    in_axes: Axes
+    in_axes: Axes,
 ) -> tuple[Array, FwdJacobian, Array]:
     if not laplace_args.all_jacobian_weak:
         return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
@@ -165,7 +164,7 @@ def sparse_index_jvp(
     merge: MergeFn,
     index_static_args: tuple | slice | None,
     flags: FunctionFlags,
-    in_axes: Axes
+    in_axes: Axes,
 ) -> tuple[Array, FwdJacobian, Array]:
     # For indexing operations we have to also index the mask, here we can just apply the jacobian
     if not laplace_args.all_jacobian_weak:
@@ -209,7 +208,7 @@ def sparse_index_jvp(
         logging.warning(
             f"Could not perform index operation {fwd_fn.__name__}. "
             "This is most likely due to data dependent indexing. "
-            "We will default to materializing everything.\n"
+            "We will default to materializing everything. Here is the caught exception:\n"
             f"{e}"
         )
         return dense_jvp(merged_fwd, laplace_args, flags=flags, in_axes=in_axes)
@@ -381,7 +380,7 @@ def get_jvp_function(
                 merge,
                 index_static_args,
                 flags=flags,
-                in_axes=in_axes
+                in_axes=in_axes,
             )
         return sparse_jvp(
             merged_fwd,
@@ -392,7 +391,7 @@ def get_jvp_function(
             kwargs=kwargs,
             sparsity_threshold=sparsity_threshold,
             flags=flags,
-            in_axes=in_axes
+            in_axes=in_axes,
         )
 
     def one_by_one_jvp(args: FwdLaplArgs, kwargs) -> tuple[Array, FwdJacobian, Array]:
@@ -420,7 +419,7 @@ def get_jvp_function(
                     kwargs=kwargs,
                     sparsity_threshold=sparsity_threshold,
                     flags=flags,
-                    in_axes=in_axes
+                    in_axes=in_axes,
                 )
 
             y_, grad_, lapl_ = _jvp(FwdLaplArgs((x,)), kwargs)

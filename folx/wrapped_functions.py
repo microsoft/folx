@@ -89,7 +89,7 @@ def dot_general(
         )
 
     result = wrap_forward_laplacian(dot_last, flags=FunctionFlags.DOT_PRODUCT | FunctionFlags.JOIN_JVP, in_axes=-1)(
-        left_inp, right_inp, sparsity_threshold=sparsity_threshold
+        (left_inp, right_inp), sparsity_threshold=sparsity_threshold
     )
     return result
 
@@ -133,7 +133,7 @@ slogdet.defjvp(slogdet_jvp)
 
 def slogdet_wrapper(x: ArrayOrFwdLaplArray, *_: ArrayOrFwdLaplArray, sparsity_threshold: int, **__):
     fwd_lapl_fn = wrap_forward_laplacian(slogdet, custom_jac_hessian_jac=slogdet_jac_hessian_jac)
-    sign, logdet = fwd_lapl_fn(x, sparsity_threshold=0)
+    sign, logdet = fwd_lapl_fn((x,), sparsity_threshold=0)
     # Remove the jacobian of the sign
     sign = warp_without_fwd_laplacian(lambda x: x)(sign, sparsity_threshold=0)
     return sign, logdet

@@ -9,9 +9,10 @@ import jax.tree_util as jtu
 import numpy as np
 from jax import core
 from jax.util import safe_map
+from jax._src.source_info_util import summarize
 
 from .api import Array, ArrayOrFwdLaplArray, FwdJacobian, FwdLaplArray, PyTree
-from .utils import extract_jacobian_mask, ravel
+from .utils import extract_jacobian_mask, logging_prefix, ravel
 from .wrapped_functions import get_laplacian, wrap_forward_laplacian
 
 R = TypeVar("R", bound=PyTree[Array])
@@ -128,12 +129,14 @@ def eval_jaxpr_with_forward_laplacian(jaxpr: core.Jaxpr, consts, *args, sparsity
     def eval_custom_jvp(eqn: core.JaxprEqn, invals):
         subfuns, args = eqn.primitive.get_bind_params(eqn.params)
         fn = functools.partial(eqn.primitive.bind, *subfuns, **args)
-        return wrap_forward_laplacian(fn)(*invals, sparsity_threshold=sparsity_threshold)
+        with logging_prefix(f"({summarize(eqn.source_info)})"):
+            return wrap_forward_laplacian(fn)(invals, sparsity_threshold=sparsity_threshold)
 
     def eval_laplacian(eqn: core.JaxprEqn, invals):
         subfuns, params = eqn.primitive.get_bind_params(eqn.params)
         fn = get_laplacian(eqn.primitive, True)
-        return fn(*subfuns, *invals, **params, sparsity_threshold=sparsity_threshold)
+        with logging_prefix(f"({summarize(eqn.source_info)})"):
+            return fn(*subfuns, invals, params, sparsity_threshold=sparsity_threshold)
 
     for eqn in jaxpr.eqns:
         invals = env.read_many(eqn.invars)

@@ -1,5 +1,5 @@
 import functools
-from typing import ParamSpec, TypeVar
+from typing import Any, ParamSpec, TypeVar
 
 import jax
 
@@ -38,7 +38,7 @@ def construct_fwd_laplacian_functions(
     merge: MergeFn,
     index_static_args: tuple | slice | None,
     sparsity_threshold: int,
-    custom_jac_hessian_jac: CustomTraceJacHessianJac | None
+    custom_jac_hessian_jac: CustomTraceJacHessianJac | None,
 ):
     def merged_fwd(*args: Array):
         return fwd(*merge(args, extra_args))
@@ -47,7 +47,13 @@ def construct_fwd_laplacian_functions(
     return ForwardLaplacianFns(
         merged_fwd,
         get_jvp_function(
-            fwd, flags, in_axes, extra_args, merge, index_static_args, sparsity_threshold
+            fwd=fwd,
+            flags=flags,
+            in_axes=in_axes,
+            extra_args=extra_args,
+            merge=merge,
+            index_static_args=index_static_args,
+            sparsity_threshold=sparsity_threshold,
         ),
         get_jacobian_hessian_jacobian_trace(
             fwd=fwd,
@@ -56,7 +62,7 @@ def construct_fwd_laplacian_functions(
             extra_args=extra_args,
             in_axes=arg_axes,
             extra_in_axes=extra_in_axes,
-            merge=merge
+            merge=merge,
         ),
     )
 
@@ -82,7 +88,9 @@ def wrap_forward_laplacian(
         in_axes = (in_axes,)
 
     def new_fn(
-        *args: ArrayOrFwdLaplArray, sparsity_threshold: int, **kwargs
+        args: tuple[ArrayOrFwdLaplArray],
+        kwargs: dict[str, Any],
+        sparsity_threshold: int,
     ) -> PyTree[ArrayOrFwdLaplArray]:
         # split arguments into ForwardLaplacianArrays and other arrays
         lapl_args, lapl_axes, extra, extra_axes, merge = split_args(args, in_axes)
@@ -100,7 +108,7 @@ def wrap_forward_laplacian(
             merge=merge,
             index_static_args=index_static_args,
             sparsity_threshold=sparsity_threshold,
-            custom_jac_hessian_jac=custom_jac_hessian_jac
+            custom_jac_hessian_jac=custom_jac_hessian_jac,
         )
         # If we have no args just do regular forward pass
         if len(lapl_args) == 0:
@@ -119,7 +127,7 @@ def warp_without_fwd_laplacian(fn) -> ForwardLaplacian:
     """
     Decorator that removes the Laplacian state from the arguments of a function.
     """
-    def wrapped(*args, sparsity_threshold: int, **kwargs):
+    def wrapped(args, kwargs, sparsity_threshold: int):
         args, kwargs = jax.tree_util.tree_map(
             lambda a: (a.x if isinstance(a, FwdLaplArray) else a),
             (args, kwargs),

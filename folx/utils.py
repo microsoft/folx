@@ -1,3 +1,6 @@
+
+import logging
+from contextlib import contextmanager
 from typing import Sequence, Type, TypeVar
 
 import jax.flatten_util as jfu
@@ -518,3 +521,19 @@ def extract_jacobian_mask(arrays: Sequence[ArrayOrFwdLaplArray]):
         ]
 
     return merge
+
+
+@contextmanager
+def logging_prefix(prefix: str):
+    class CustomFormatter(logging.Formatter):
+        def format(self, record):
+            record.msg = f"{record.levelname}:[folx]{prefix} - {record.msg}"
+            return super().format(record)
+
+    logger = logging.getLogger()
+    old_handlers = logger.handlers
+    myHandler = logging.StreamHandler()
+    myHandler.setFormatter(CustomFormatter())
+    logger.handlers = [myHandler]
+    yield
+    logger.handlers = old_handlers
