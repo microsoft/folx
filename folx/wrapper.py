@@ -1,5 +1,5 @@
 import functools
-from typing import ParamSpec, TypeVar
+from typing import Any, ParamSpec, TypeVar
 
 import jax
 
@@ -24,8 +24,8 @@ from .jvp import get_jvp_function
 from .tree_utils import tree_add
 from .utils import split_args
 
-R = TypeVar("R", bound=PyTree[Array])
-P = ParamSpec("P")
+R = TypeVar('R', bound=PyTree[Array])
+P = ParamSpec('P')
 
 
 def construct_fwd_laplacian_functions(
@@ -38,7 +38,7 @@ def construct_fwd_laplacian_functions(
     merge: MergeFn,
     index_static_args: tuple | slice | None,
     sparsity_threshold: int,
-    custom_jac_hessian_jac: CustomTraceJacHessianJac | None
+    custom_jac_hessian_jac: CustomTraceJacHessianJac | None,
 ):
     def merged_fwd(*args: Array):
         return fwd(*merge(args, extra_args))
@@ -47,7 +47,13 @@ def construct_fwd_laplacian_functions(
     return ForwardLaplacianFns(
         merged_fwd,
         get_jvp_function(
-            fwd, flags, in_axes, extra_args, merge, index_static_args, sparsity_threshold
+            fwd=fwd,
+            flags=flags,
+            in_axes=in_axes,
+            extra_args=extra_args,
+            merge=merge,
+            index_static_args=index_static_args,
+            sparsity_threshold=sparsity_threshold,
         ),
         get_jacobian_hessian_jacobian_trace(
             fwd=fwd,
@@ -56,7 +62,7 @@ def construct_fwd_laplacian_functions(
             extra_args=extra_args,
             in_axes=arg_axes,
             extra_in_axes=extra_in_axes,
-            merge=merge
+            merge=merge,
         ),
     )
 
@@ -67,7 +73,7 @@ def wrap_forward_laplacian(
     flags: FunctionFlags = FunctionFlags.GENERAL,
     name: str | None = None,
     index_static_args: tuple | slice | None = None,
-    custom_jac_hessian_jac: CustomTraceJacHessianJac | None = None
+    custom_jac_hessian_jac: CustomTraceJacHessianJac | None = None,
 ) -> ForwardLaplacian:
     """
     Add forward Laplacian functionality to a function.
@@ -82,14 +88,16 @@ def wrap_forward_laplacian(
         in_axes = (in_axes,)
 
     def new_fn(
-        *args: ArrayOrFwdLaplArray, sparsity_threshold: int, **kwargs
+        args: tuple[ArrayOrFwdLaplArray],
+        kwargs: dict[str, Any],
+        sparsity_threshold: int,
     ) -> PyTree[ArrayOrFwdLaplArray]:
         # split arguments into ForwardLaplacianArrays and other arrays
         lapl_args, lapl_axes, extra, extra_axes, merge = split_args(args, in_axes)
 
         # construct operation
         partial_fn = functools.partial(fn, **kwargs)
-        setattr(partial_fn, "__name__", name or getattr(fn, "__name__", "partial"))
+        setattr(partial_fn, '__name__', name or getattr(fn, '__name__', 'partial'))
         lapl_fns = construct_fwd_laplacian_functions(
             partial_fn,
             flags,
@@ -100,7 +108,7 @@ def wrap_forward_laplacian(
             merge=merge,
             index_static_args=index_static_args,
             sparsity_threshold=sparsity_threshold,
-            custom_jac_hessian_jac=custom_jac_hessian_jac
+            custom_jac_hessian_jac=custom_jac_hessian_jac,
         )
         # If we have no args just do regular forward pass
         if len(lapl_args) == 0:
@@ -109,7 +117,9 @@ def wrap_forward_laplacian(
         # Actually update Laplacian state
         laplace_args = FwdLaplArgs(lapl_args)
         y, grad_y, lapl_y = lapl_fns.jvp(laplace_args, kwargs)
-        lapl_y = tree_add(lapl_y, lapl_fns.jac_hessian_jac_trace(laplace_args, sparsity_threshold))
+        lapl_y = tree_add(
+            lapl_y, lapl_fns.jac_hessian_jac_trace(laplace_args, sparsity_threshold)
+        )
         return jax.tree_util.tree_map(FwdLaplArray, y, grad_y, lapl_y)
 
     return new_fn
@@ -119,7 +129,8 @@ def warp_without_fwd_laplacian(fn) -> ForwardLaplacian:
     """
     Decorator that removes the Laplacian state from the arguments of a function.
     """
-    def wrapped(*args, sparsity_threshold: int, **kwargs):
+
+    def wrapped(args, kwargs, sparsity_threshold: int):
         args, kwargs = jax.tree_util.tree_map(
             lambda a: (a.x if isinstance(a, FwdLaplArray) else a),
             (args, kwargs),

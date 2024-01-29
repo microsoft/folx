@@ -41,3 +41,12 @@ pytest = "*"
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.ruff.lint]
+ignore = [
+    "E741", # ambiguous variable name
+]
+
+[tool.ruff.format]
+quote-style="single"
+line-ending = "lf"
