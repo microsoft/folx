@@ -6,7 +6,6 @@ import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 from jax.core import Primitive
-from jax.typing import DTypeLike
 
 from .api import (
     Array,
@@ -109,13 +108,11 @@ def dot_general(
 
 
 def dtype_conversion(
-    arr: ArrayOrFwdLaplArray,
-    *_: ArrayOrFwdLaplArray,
-    new_dtype: DTypeLike,
+    args: tuple[ArrayOrFwdLaplArray],
+    kwargs: dict[str, Any],
     sparsity_threshold: int,
-    **kwargs,
 ):
-    return arr.astype(new_dtype)
+    return args[0].astype(kwargs['new_dtype'])
 
 
 @jax.custom_jvp

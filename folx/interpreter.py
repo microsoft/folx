@@ -20,7 +20,7 @@ from .api import (
     FwdLaplArray,
     PyTree,
 )
-from .utils import extract_jacobian_mask, logging_prefix, ravel
+from .utils import LoggingPrefix, extract_jacobian_mask, ravel
 from .wrapped_functions import get_laplacian, wrap_forward_laplacian
 
 R = TypeVar('R', bound=PyTree[Array])
@@ -154,7 +154,7 @@ def eval_jaxpr_with_forward_laplacian(
     def eval_custom_jvp(eqn: core.JaxprEqn, invals):
         subfuns, args = eqn.primitive.get_bind_params(eqn.params)
         fn = functools.partial(eqn.primitive.bind, *subfuns, **args)
-        with logging_prefix(f'({summarize(eqn.source_info)})'):
+        with LoggingPrefix(f'({summarize(eqn.source_info)})'):
             return wrap_forward_laplacian(fn)(
                 invals, {}, sparsity_threshold=sparsity_threshold
             )
@@ -162,7 +162,7 @@ def eval_jaxpr_with_forward_laplacian(
     def eval_laplacian(eqn: core.JaxprEqn, invals):
         subfuns, params = eqn.primitive.get_bind_params(eqn.params)
         fn = get_laplacian(eqn.primitive, True)
-        with logging_prefix(f'({summarize(eqn.source_info)})'):
+        with LoggingPrefix(f'({summarize(eqn.source_info)})'):
             return fn(
                 (*subfuns, *invals), params, sparsity_threshold=sparsity_threshold
             )
@@ -182,11 +182,12 @@ def eval_jaxpr_with_forward_laplacian(
                     with core.new_main(core.EvalTrace, dynamic=True):
                         outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
                 except Exception as e:
-                    logging.warning(
-                        f'Could not perform operation {eqn.primitive.name} in eager execution despite it only depending on non-input dependent values. '
-                        'We switch to tracing rather than eager execution. This may impact sparsity propagation.\n'
-                        f'{e}'
-                    )
+                    with LoggingPrefix(f'({summarize(eqn.source_info)})'):
+                        logging.warning(
+                            f'Could not perform operation {eqn.primitive.name} in eager execution despite it only depending on non-input dependent values. '
+                            'We switch to tracing rather than eager execution. This may impact sparsity propagation.\n'
+                            f'{e}'
+                        )
                     outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
             else:
                 outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
@@ -213,7 +214,7 @@ def init_forward_laplacian_state(
     """
     Initialize forward Laplacian state from a PyTree of arrays.
     """
-    if any(IS_LPL_ARR(x_) for x_ in jtu.tree_map(x, is_leaf=IS_LEAF)):
+    if any(IS_LPL_ARR(x_) for x_ in jtu.tree_leaves(x, is_leaf=IS_LEAF)):
         return x
     x_flat, unravel = ravel(x)
     jac = jtu.tree_map(jnp.ones_like, x)

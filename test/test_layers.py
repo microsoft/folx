@@ -1,3 +1,4 @@
+import functools
 import unittest
 
 import jax
@@ -139,6 +140,40 @@ class TestForwardLaplacian(unittest.TestCase):
                 self.assertTrue(np.allclose(y.jacobian.dense_array, jacobian(f, x).T))
                 self.assertTrue(np.allclose(y.laplacian, 10))
         deregister_function('identity')
+
+    def test_dtype(self):
+        x = np.random.normal(size=(16,))
+
+        def f(x, dtype):
+            return jnp.astype(x, dtype)
+
+        for dtype in [
+            jnp.float16,
+            jnp.float32,
+            jnp.float64,
+            jnp.complex64,
+            jnp.complex128,
+        ]:
+            with self.subTest(dtype=dtype):
+                y = jax.jit(forward_laplacian(functools.partial(f, dtype=dtype)))(x)
+                self.assertEqual(y.x.dtype, dtype)
+                self.assertEqual(y.jacobian.dense_array.dtype, dtype)
+                self.assertEqual(y.laplacian.dtype, dtype)
+
+        for dtype in [
+            jnp.bool_,
+            jnp.int8,
+            jnp.int16,
+            jnp.int32,
+            jnp.int64,
+            jnp.uint8,
+            jnp.uint16,
+            jnp.uint32,
+            jnp.uint64,
+        ]:
+            with self.subTest(dtype=dtype):
+                y = jax.jit(forward_laplacian(functools.partial(f, dtype=dtype)))(x)
+                self.assertIsInstance(y, jax.Array)
 
 
 if __name__ == '__main__':
