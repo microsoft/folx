@@ -11,7 +11,15 @@ from jax import core
 from jax.util import safe_map
 from jax._src.source_info_util import summarize
 
-from .api import Array, ArrayOrFwdLaplArray, FwdJacobian, FwdLaplArray, PyTree
+from .api import (
+    IS_LEAF,
+    IS_LPL_ARR,
+    Array,
+    ArrayOrFwdLaplArray,
+    FwdJacobian,
+    FwdLaplArray,
+    PyTree,
+)
 from .utils import extract_jacobian_mask, logging_prefix, ravel
 from .wrapped_functions import get_laplacian, wrap_forward_laplacian
 
@@ -205,6 +213,8 @@ def init_forward_laplacian_state(
     """
     Initialize forward Laplacian state from a PyTree of arrays.
     """
+    if any(IS_LPL_ARR(x_) for x_ in jtu.tree_map(x, is_leaf=IS_LEAF)):
+        return x
     x_flat, unravel = ravel(x)
     jac = jtu.tree_map(jnp.ones_like, x)
     jac_idx = unravel(np.arange(x_flat.shape[0]))
@@ -238,8 +248,11 @@ def forward_laplacian(
     """
 
     def wrapped(*args: P.args, **kwargs: P.kwargs):
-        closed_jaxpr = jax.make_jaxpr(fn)(*args, **kwargs)
-        flat_args = jtu.tree_leaves(args)
+        args_arr = jtu.tree_map(
+            lambda x: x.x if IS_LPL_ARR(x) else x, args, is_leaf=IS_LEAF
+        )
+        closed_jaxpr = jax.make_jaxpr(fn)(*args_arr, **kwargs)
+        flat_args = jtu.tree_leaves(args, is_leaf=IS_LEAF)
         if 0 < sparsity_threshold < 1:
             threshold = int(sparsity_threshold * sum(x.size for x in flat_args))
         else:
@@ -251,7 +264,7 @@ def forward_laplacian(
             *lapl_args,
             sparsity_threshold=threshold,
         )
-        out_structure = jtu.tree_structure(jax.eval_shape(fn, *args, **kwargs))
+        out_structure = jtu.tree_structure(jax.eval_shape(fn, *args_arr, **kwargs))
         return out_structure.unflatten(out)
 
     if disable_jit:
