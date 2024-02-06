@@ -136,10 +136,15 @@ def slogdet_jvp(primals, tangents):
 
     jacobians = jnp.linalg.inv(primals)
 
-    def custom_jvp(jacobian, tangent):
-        return (jnp.zeros(()), jnp.vdot(jacobian.T, tangent))
+    def custom_jvp(jacobian, tangent, sign):
+        jac_dot_tangent = jnp.vdot(jacobian.T, tangent)
+        if jac_dot_tangent.dtype in (jnp.complex64, jnp.complex128):
+            sign_jvp = sign * 1j * jac_dot_tangent.imag
+        else:
+            sign_jvp = jnp.zeros(())
+        return (sign_jvp, jac_dot_tangent.real)
 
-    y_tangent = jax.vmap(custom_jvp)(jacobians, tangents)
+    y_tangent = jax.vmap(custom_jvp)(jacobians, tangents, sign)
 
     y, y_tangent = jtu.tree_map(lambda x: x.reshape(*batch_shape), (y, y_tangent))
     return y, y_tangent
@@ -158,11 +163,30 @@ def slogdet_wrapper(
     )
     sign, logdet = fwd_lapl_fn(x, {}, sparsity_threshold=0)
     # Remove the jacobian of the sign
-    sign = warp_without_fwd_laplacian(lambda x: x)((sign,), {}, sparsity_threshold=0)
+    if sign.x.dtype not in (jnp.complex64, jnp.complex128):
+        sign = sign.x
     return sign, logdet
 
 
+def imag_wrapper(
+    x: tuple[ArrayOrFwdLaplArray],
+    kwargs: dict[str, Any],
+    sparsity_threshold: int,
+):
+    return x[0].imag
+
+
+def real_wrapper(
+    x: tuple[ArrayOrFwdLaplArray],
+    kwargs: dict[str, Any],
+    sparsity_threshold: int,
+):
+    return x[0].real
+
+
 _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
+    jax.lax.imag_p: imag_wrapper,
+    jax.lax.real_p: real_wrapper,
     jax.lax.dot_general_p: dot_general,
     jax.lax.abs_p: wrap_forward_laplacian(
         jax.lax.abs, flags=FunctionFlags.LINEAR, in_axes=()

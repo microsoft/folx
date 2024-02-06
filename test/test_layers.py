@@ -145,7 +145,7 @@ class TestForwardLaplacian(unittest.TestCase):
         x = np.random.normal(size=(16,))
 
         def f(x, dtype):
-            return jnp.astype(x, dtype)
+            return jax.lax.convert_element_type(x, dtype)
 
         for dtype in [
             jnp.float16,

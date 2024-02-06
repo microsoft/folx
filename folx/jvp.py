@@ -373,7 +373,10 @@ def dense_elementwise_jvp(
     if y.shape != laplace_args.x[0].shape:
         return dense_split_jvp(fwd, laplace_args)
 
-    jac = jax.grad(lambda x: jnp.sum(fwd(x)))(laplace_args.x[0])  # type: ignore
+    if laplace_args.x[0].dtype in (jnp.complex64, jnp.complex128):
+        _, jac = jax.jvp(fwd, (laplace_args.x[0],), (jnp.ones_like(laplace_args.x[0]),))
+    else:
+        jac = jax.grad(lambda x: jnp.sum(fwd(x)))(laplace_args.x[0])  # type: ignore
     grad_y = jac * laplace_args.dense_jacobian[0]
     lapl_y = jac * laplace_args.laplacian[0]
     return y, grad_y, lapl_y

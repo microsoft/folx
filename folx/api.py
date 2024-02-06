@@ -225,6 +225,14 @@ class FwdJacobian(NamedTuple):
     def astype(self, dtype):
         return FwdJacobian(self.data.astype(dtype), self.x0_idx)
 
+    @property
+    def real(self):
+        return FwdJacobian(self.data.real, self.x0_idx)
+
+    @property
+    def imag(self):
+        return FwdJacobian(self.data.imag, self.x0_idx)
+
 
 class FwdLaplArray(NamedTuple):
     """
@@ -279,6 +287,14 @@ class FwdLaplArray(NamedTuple):
             )
         # If we convert to integer or boolean we drop the derivatives
         return self.x.astype(dtype)
+
+    @property
+    def real(self):
+        return FwdLaplArray(self.x.real, self.jacobian.real, self.laplacian.real)
+
+    @property
+    def imag(self):
+        return FwdLaplArray(self.x.imag, self.jacobian.imag, self.laplacian.imag)
 
 
 def IS_LPL_ARR(x):
