@@ -1,3 +1,4 @@
+import importlib.metadata
 from .interpreter import forward_laplacian
 from .operators import (
     ForwardLaplacianOperator,
@@ -22,3 +23,5 @@ __all__ = [
     'deregister_function',
     'register_function',
 ]
+
+__version__ = importlib.metadata.version(__package__ or __name__)

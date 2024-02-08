@@ -34,6 +34,7 @@ from .utils import (
     trace_of_product,
     vmap_sequences_and_squeeze,
 )
+from .ad import hessian, jacrev
 
 
 def general_jac_hessian_jac(
@@ -56,8 +57,8 @@ def general_jac_hessian_jac(
     grad_2d = jnp.concatenate([x.T for x in grads_2d], axis=0)
     D, K = grad_2d.shape
     if K > D:
-        # jax.hessian uses Fwd on Reverse AD
-        flat_hessian = jax.hessian(flat_fn)(flat_x)
+        # Fwd on Reverse AD
+        flat_hessian = hessian(flat_fn)(flat_x)
         flat_out = trace_of_product(flat_hessian, grad_2d @ grad_2d.T)
     elif D > K:
         # Directly copmute the trace of tr(HJJ^T)=tr(J^THJ)
@@ -79,7 +80,7 @@ def general_jac_hessian_jac(
         @functools.partial(jax.vmap, in_axes=-1, out_axes=-1)
         def hvp(tangent):
             def jacobian(x):
-                return jax.jacrev(flat_fn)(x)
+                return jacrev(flat_fn)(x)
 
             return jax.jvp(jacobian, (flat_x,), (tangent,))[1]
 
@@ -115,7 +116,9 @@ def off_diag_jac_hessian_jac(
     return unravel(flat_out)
 
 
-def mul_jac_hessian_jac(fn: ForwardFn, args: FwdLaplArgs, shared_idx: Array | None):
+def dot_product_jac_hessian_jac(
+    fn: ForwardFn, args: FwdLaplArgs, shared_idx: Array | None
+):
     # For a dot product we know that the hessian looks like this:
     # [0, I]
     # [I, 0]
@@ -321,7 +324,7 @@ def vmapped_jac_hessian_jac(
         if custom_jac_hessian_jac is not None:
             result = custom_jac_hessian_jac(args, extra_args, merge, materialize_idx)
         elif FunctionFlags.MULTIPLICATION in flags:
-            result = mul_jac_hessian_jac(merged_fn, args, materialize_idx)
+            result = dot_product_jac_hessian_jac(merged_fn, args, materialize_idx)
         elif FunctionFlags.LINEAR_IN_ONE in flags:
             result = off_diag_jac_hessian_jac(merged_fn, args, materialize_idx)
         else:

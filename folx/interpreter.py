@@ -11,8 +11,16 @@ from jax import core
 from jax.util import safe_map
 from jax._src.source_info_util import summarize
 
-from .api import Array, ArrayOrFwdLaplArray, FwdJacobian, FwdLaplArray, PyTree
-from .utils import extract_jacobian_mask, logging_prefix, ravel
+from .api import (
+    IS_LEAF,
+    IS_LPL_ARR,
+    Array,
+    ArrayOrFwdLaplArray,
+    FwdJacobian,
+    FwdLaplArray,
+    PyTree,
+)
+from .utils import LoggingPrefix, extract_jacobian_mask, ravel
 from .wrapped_functions import get_laplacian, wrap_forward_laplacian
 
 R = TypeVar('R', bound=PyTree[Array])
@@ -146,7 +154,7 @@ def eval_jaxpr_with_forward_laplacian(
     def eval_custom_jvp(eqn: core.JaxprEqn, invals):
         subfuns, args = eqn.primitive.get_bind_params(eqn.params)
         fn = functools.partial(eqn.primitive.bind, *subfuns, **args)
-        with logging_prefix(f'({summarize(eqn.source_info)})'):
+        with LoggingPrefix(f'({summarize(eqn.source_info)})'):
             return wrap_forward_laplacian(fn)(
                 invals, {}, sparsity_threshold=sparsity_threshold
             )
@@ -154,7 +162,7 @@ def eval_jaxpr_with_forward_laplacian(
     def eval_laplacian(eqn: core.JaxprEqn, invals):
         subfuns, params = eqn.primitive.get_bind_params(eqn.params)
         fn = get_laplacian(eqn.primitive, True)
-        with logging_prefix(f'({summarize(eqn.source_info)})'):
+        with LoggingPrefix(f'({summarize(eqn.source_info)})'):
             return fn(
                 (*subfuns, *invals), params, sparsity_threshold=sparsity_threshold
             )
@@ -174,11 +182,12 @@ def eval_jaxpr_with_forward_laplacian(
                     with core.new_main(core.EvalTrace, dynamic=True):
                         outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
                 except Exception as e:
-                    logging.warning(
-                        f'Could not perform operation {eqn.primitive.name} in eager execution despite it only depending on non-input dependent values. '
-                        'We switch to tracing rather than eager execution. This may impact sparsity propagation.\n'
-                        f'{e}'
-                    )
+                    with LoggingPrefix(f'({summarize(eqn.source_info)})'):
+                        logging.warning(
+                            f'Could not perform operation {eqn.primitive.name} in eager execution despite it only depending on non-input dependent values. '
+                            'We switch to tracing rather than eager execution. This may impact sparsity propagation.\n'
+                            f'{e}'
+                        )
                     outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
             else:
                 outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
@@ -205,6 +214,8 @@ def init_forward_laplacian_state(
     """
     Initialize forward Laplacian state from a PyTree of arrays.
     """
+    if any(IS_LPL_ARR(x_) for x_ in jtu.tree_leaves(x, is_leaf=IS_LEAF)):
+        return x
     x_flat, unravel = ravel(x)
     jac = jtu.tree_map(jnp.ones_like, x)
     jac_idx = unravel(np.arange(x_flat.shape[0]))
@@ -238,8 +249,11 @@ def forward_laplacian(
     """
 
     def wrapped(*args: P.args, **kwargs: P.kwargs):
-        closed_jaxpr = jax.make_jaxpr(fn)(*args, **kwargs)
-        flat_args = jtu.tree_leaves(args)
+        args_arr = jtu.tree_map(
+            lambda x: x.x if IS_LPL_ARR(x) else x, args, is_leaf=IS_LEAF
+        )
+        closed_jaxpr = jax.make_jaxpr(fn)(*args_arr, **kwargs)
+        flat_args = jtu.tree_leaves(args, is_leaf=IS_LEAF)
         if 0 < sparsity_threshold < 1:
             threshold = int(sparsity_threshold * sum(x.size for x in flat_args))
         else:
@@ -251,7 +265,7 @@ def forward_laplacian(
             *lapl_args,
             sparsity_threshold=threshold,
         )
-        out_structure = jtu.tree_structure(jax.eval_shape(fn, *args, **kwargs))
+        out_structure = jtu.tree_structure(jax.eval_shape(fn, *args_arr, **kwargs))
         return out_structure.unflatten(out)
 
     if disable_jit:

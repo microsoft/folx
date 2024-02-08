@@ -1,5 +1,4 @@
 import logging
-from contextlib import contextmanager
 from typing import Sequence, Type, TypeVar
 
 import jax.flatten_util as jfu
@@ -546,17 +545,29 @@ def extract_jacobian_mask(arrays: Sequence[ArrayOrFwdLaplArray]):
     return merge
 
 
-@contextmanager
-def logging_prefix(prefix: str):
-    class CustomFormatter(logging.Formatter):
-        def format(self, record):
-            record.msg = f'{record.levelname}:[folx]{prefix} - {record.msg}'
-            return super().format(record)
+class LoggingPrefix(logging.Formatter):
+    prefix: str
+    _old_handlers = None
 
-    logger = logging.getLogger()
-    old_handlers = logger.handlers
-    myHandler = logging.StreamHandler()
-    myHandler.setFormatter(CustomFormatter())
-    logger.handlers = [myHandler]
-    yield
-    logger.handlers = old_handlers
+    def __init__(self, prefix: str):
+        self.prefix = prefix
+        super().__init__()
+
+    def format(self, record):
+        record.msg = f'{record.levelname}:[folx]{self.prefix} - {record.msg}'
+        return super().format(record)
+
+    def __enter__(self):
+        logger = logging.getLogger()
+        self._old_handlers = logger.handlers
+        myHandler = logging.StreamHandler()
+        myHandler.setFormatter(self)
+        logger.handlers = [myHandler]
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if exc_type is not None:
+            logging.error(
+                'Exception occurred', exc_info=(exc_type, exc_value, traceback)
+            )
+        logger = logging.getLogger()
+        logger.handlers = self._old_handlers
