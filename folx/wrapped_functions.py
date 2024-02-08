@@ -119,7 +119,10 @@ def dtype_conversion(
 def slogdet(x):
     # We only need this custom slog det to avoid a jax bug
     # https://github.com/google/jax/issues/17379
-    return jnp.linalg.slogdet(x)
+    # We explictily decompose this here as newer version will return
+    # SlogDetResult which is a NamedTuple and does not combine nicely with regular tuples.
+    sign, logdet = jnp.linalg.slogdet(x)
+    return sign, logdet
 
 
 def slogdet_jvp(primals, tangents):
