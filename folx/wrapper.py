@@ -120,7 +120,14 @@ def wrap_forward_laplacian(
         lapl_y = tree_add(
             lapl_y, lapl_fns.jac_hessian_jac_trace(laplace_args, sparsity_threshold)
         )
-        return jax.tree_util.tree_map(FwdLaplArray, y, grad_y, lapl_y)
+        return jax.tree_util.tree_map(
+            lambda x, jac, lapl: FwdLaplArray(
+                x, jac.astype(x.dtype), lapl.astype(x.dtype)
+            ),
+            y,
+            grad_y,
+            lapl_y,
+        )
 
     return new_fn
 
