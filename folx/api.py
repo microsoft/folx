@@ -273,12 +273,8 @@ class FwdLaplArray(NamedTuple):
         return FwdLaplArray(self.x, self.jacobian.as_dense, self.laplacian)
 
     def astype(self, dtype):
-        if dtype in (
-            jnp.float16,
-            jnp.float32,
-            jnp.float64,
-            jnp.complex64,
-            jnp.complex128,
+        if jax.dtypes.issubdtype(dtype, jnp.floating) or jax.dtypes.issubdtype(
+            dtype, jnp.complexfloating
         ):
             return FwdLaplArray(
                 self.x.astype(dtype),
@@ -287,6 +283,10 @@ class FwdLaplArray(NamedTuple):
             )
         # If we convert to integer or boolean we drop the derivatives
         return self.x.astype(dtype)
+
+    @property
+    def dtype(self):
+        return self.x.dtype
 
     @property
     def real(self):

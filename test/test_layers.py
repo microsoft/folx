@@ -1,9 +1,6 @@
 import functools
-import unittest
 
 import jax
-import jax.experimental
-import jax.flatten_util as jfu
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
@@ -15,26 +12,10 @@ from folx import (
     register_function,
 )
 
-jax.config.update('jax_enable_x64', True)
+from laplacian_testcase import LaplacianTestCase
 
 
-def jacobian(f, x):
-    return jax.jit(jax.jacobian(f))(x)
-
-
-def laplacian(f, x):
-    flat_x, unravel = jfu.ravel_pytree(x)
-
-    def flat_f(flat_x):
-        return jfu.ravel_pytree(f(unravel(flat_x)))[0]
-
-    def lapl_fn(x):
-        return jnp.trace(jax.hessian(flat_f)(x), axis1=-2, axis2=-1)
-
-    return jax.jit(lapl_fn)(flat_x)
-
-
-class TestForwardLaplacian(unittest.TestCase):
+class TestForwardLaplacian(LaplacianTestCase):
     def test_elementwise(self):
         functions = [
             jnp.sin,
@@ -52,14 +33,9 @@ class TestForwardLaplacian(unittest.TestCase):
                 with self.subTest(sparsity=sparsity, f=f):
                     y = forward_laplacian(f, sparsity)(x)
                     self.assertEqual(y.x.shape, x.shape, msg=f'{f}')
-                    self.assertTrue(np.allclose(y.x, f(x)), msg=f'{f}')
-                    self.assertTrue(
-                        np.allclose(y.jacobian.dense_array, jacobian(f, x).T),
-                        msg=f'{f}',
-                    )
-                    self.assertTrue(
-                        np.allclose(y.laplacian, laplacian(f, x)), msg=f'{f}'
-                    )
+                    self.assert_allclose(y.x, f(x))
+                    self.assert_allclose(y.jacobian.dense_array, self.jacobian(f, x).T)
+                    self.assert_allclose(y.laplacian, self.laplacian(f, x))
 
     def test_matmul(self):
         x = np.random.normal(size=(16,))
@@ -73,9 +49,9 @@ class TestForwardLaplacian(unittest.TestCase):
             with self.subTest(sparsity=sparsity):
                 y = forward_laplacian(f, sparsity)(x)
                 self.assertEqual(y.x.shape, f(x).shape)
-                self.assertTrue(np.allclose(y.x, f(x)))
-                self.assertTrue(np.allclose(y.jacobian.dense_array, jacobian(f, x).T))
-                self.assertTrue(np.allclose(y.laplacian, laplacian(f, x)))
+                self.assert_allclose(y.x, f(x))
+                self.assert_allclose(y.jacobian.dense_array, self.jacobian(f, x).T)
+                self.assert_allclose(y.laplacian, self.laplacian(f, x))
 
     def test_dot(self):
         a = np.random.normal(size=(16,))
@@ -90,11 +66,11 @@ class TestForwardLaplacian(unittest.TestCase):
             with self.subTest(sparsity=sparsity):
                 y = jax.jit(forward_laplacian(f, sparsity))((a, b))
                 self.assertEqual(y.x.shape, f((a, b)).shape)
-                self.assertTrue(np.allclose(y.x, f((a, b))))
-                jac = jacobian(f, (a, b))
+                self.assert_allclose(y.x, f((a, b)))
+                jac = self.jacobian(f, (a, b))
                 jac = jnp.concatenate(jtu.tree_leaves(jac), axis=0)
-                self.assertTrue(np.allclose(y.jacobian.dense_array, jac))
-                self.assertTrue(np.allclose(y.laplacian, laplacian(f, (a, b))))
+                self.assert_allclose(y.jacobian.dense_array, jac)
+                self.assert_allclose(y.laplacian, self.laplacian(f, (a, b)))
 
     def test_slogdet(self):
         x = np.random.normal(size=(16 * 16))
@@ -107,9 +83,9 @@ class TestForwardLaplacian(unittest.TestCase):
             with self.subTest(sparsity=sparsity):
                 y = jax.jit(forward_laplacian(f, sparsity))(x)
                 self.assertEqual(y.x.shape, f(x).shape)
-                self.assertTrue(np.allclose(y.x, f(x)))
-                self.assertTrue(np.allclose(y.jacobian.dense_array, jacobian(f, x).T))
-                self.assertTrue(np.allclose(y.laplacian, laplacian(f, x)))
+                self.assert_allclose(y.x, f(x))
+                self.assert_allclose(y.jacobian.dense_array, self.jacobian(f, x).T)
+                self.assert_allclose(y.laplacian, self.laplacian(f, x))
 
     def test_custom_hessian(self):
         x = np.random.normal(size=(16,))
@@ -136,9 +112,9 @@ class TestForwardLaplacian(unittest.TestCase):
             with self.subTest(sparsity=sparsity):
                 y = jax.jit(forward_laplacian(f, sparsity))(x)
                 self.assertEqual(y.x.shape, f(x).shape)
-                self.assertTrue(np.allclose(y.x, f(x)))
-                self.assertTrue(np.allclose(y.jacobian.dense_array, jacobian(f, x).T))
-                self.assertTrue(np.allclose(y.laplacian, 10))
+                self.assert_allclose(y.x, f(x))
+                self.assert_allclose(y.jacobian.dense_array, self.jacobian(f, x).T)
+                self.assert_allclose(y.laplacian, 10)
         deregister_function('identity')
 
     def test_dtype(self):
@@ -174,7 +150,3 @@ class TestForwardLaplacian(unittest.TestCase):
             with self.subTest(dtype=dtype):
                 y = jax.jit(forward_laplacian(functools.partial(f, dtype=dtype)))(x)
                 self.assertIsInstance(y, jax.Array)
-
-
-if __name__ == '__main__':
-    unittest.main()

@@ -163,7 +163,7 @@ def slogdet_wrapper(
     )
     sign, logdet = fwd_lapl_fn(x, {}, sparsity_threshold=0)
     # Remove the jacobian of the sign
-    if sign.x.dtype not in (jnp.complex64, jnp.complex128):
+    if jax.dtypes.issubdtype(sign.dtype, jnp.complexfloating):
         sign = sign.x
     return sign, logdet
 

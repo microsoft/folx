@@ -1,31 +1,14 @@
 import unittest
-
 import jax
-import jax.experimental
-import jax.flatten_util as jfu
 import jax.numpy as jnp
 import numpy as np
 
 from folx import forward_laplacian
 
-
-def jacobian(f, x):
-    return jax.jit(jax.jacobian(f))(x)
+from laplacian_testcase import LaplacianTestCase
 
 
-def laplacian(f, x):
-    flat_x, unravel = jfu.ravel_pytree(x)
-
-    def flat_f(flat_x):
-        return jfu.ravel_pytree(f(unravel(flat_x)))[0]
-
-    def lapl_fn(x):
-        return jnp.trace(jax.hessian(flat_f)(x), axis1=-2, axis2=-1)
-
-    return jax.jit(lapl_fn)(flat_x)
-
-
-class TestForwardLaplacian(unittest.TestCase):
+class TestForwardLaplacian(LaplacianTestCase):
     def test_mlp(self):
         x = np.random.normal(size=(16,))
         layers = [
@@ -44,10 +27,12 @@ class TestForwardLaplacian(unittest.TestCase):
                 y = jax.jit(forward_laplacian(mlp, sparsity))(x)
                 self.assertEqual(y.shape, mlp(x).shape)
                 self.assertEqual(y.laplacian.shape, mlp(x).shape)
-                self.assertEqual(y.jacobian.dense_array.shape, jacobian(mlp, x).shape)
-                self.assertTrue(np.allclose(y.laplacian, laplacian(mlp, x)))
-                self.assertTrue(np.allclose(y.x, mlp(x)))
-                self.assertTrue(np.allclose(y.jacobian.dense_array, jacobian(mlp, x)))
+                self.assertEqual(
+                    y.jacobian.dense_array.shape, self.jacobian(mlp, x).shape
+                )
+                self.assert_allclose(y.laplacian, self.laplacian(mlp, x))
+                self.assert_allclose(y.x, mlp(x))
+                self.assert_allclose(y.jacobian.dense_array, self.jacobian(mlp, x))
 
     def test_attention(self):
         x = np.random.normal(size=(16, 4))
@@ -66,12 +51,14 @@ class TestForwardLaplacian(unittest.TestCase):
                 self.assertEqual(y.laplacian.shape, attention(x).shape)
                 self.assertEqual(
                     y.jacobian.dense_array.shape,
-                    jacobian(attention, x).reshape(-1).shape,
+                    self.jacobian(attention, x).reshape(-1).shape,
                 )
-                self.assertTrue(np.allclose(y.x, attention(x)))
-                self.assertTrue(
-                    np.allclose(
-                        y.jacobian.dense_array, jacobian(attention, x).reshape(-1)
-                    )
+                self.assert_allclose(y.x, attention(x))
+                self.assert_allclose(
+                    y.jacobian.dense_array, self.jacobian(attention, x).reshape(-1)
                 )
-                self.assertTrue(np.allclose(y.laplacian, laplacian(attention, x)))
+                self.assert_allclose(y.laplacian, self.laplacian(attention, x))
+
+
+if __name__ == '__main__':
+    unittest.main()
