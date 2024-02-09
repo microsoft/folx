@@ -161,8 +161,8 @@ def eval_jaxpr_with_forward_laplacian(
 
     def eval_laplacian(eqn: core.JaxprEqn, invals):
         subfuns, params = eqn.primitive.get_bind_params(eqn.params)
-        fn = get_laplacian(eqn.primitive, True)
         with LoggingPrefix(f'({summarize(eqn.source_info)})'):
+            fn = get_laplacian(eqn.primitive, True)
             return fn(
                 (*subfuns, *invals), params, sparsity_threshold=sparsity_threshold
             )
