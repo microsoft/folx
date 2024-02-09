@@ -74,10 +74,11 @@ class TestForwardLaplacian(LaplacianTestCase):
 
     def test_slogdet(self):
         x = np.random.normal(size=(16 * 16))
+        w = np.random.normal(size=(16, 16))
 
         @jax.jit
         def f(x):
-            return jnp.linalg.slogdet(x.reshape(16, 16))[1]
+            return jnp.linalg.slogdet(jnp.tanh(x.reshape(16, 16) @ w))[1]
 
         for sparsity in [0, x.size]:
             with self.subTest(sparsity=sparsity):
