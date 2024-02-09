@@ -293,11 +293,11 @@ _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
         flags=FunctionFlags.INDEXING | FunctionFlags.SCATTER,
         name='scatter',
     ),
-    jax.lax.scatter_add_p: wrap_forward_laplacian(
-        jax.lax.scatter_add_p.bind,
-        flags=FunctionFlags.LINEAR | FunctionFlags.SCATTER,
-        name='scatter_add',
-    ),
+    # jax.lax.scatter_add_p: wrap_forward_laplacian(
+    #     jax.lax.scatter_add_p.bind,
+    #     flags=FunctionFlags.LINEAR | FunctionFlags.SCATTER,
+    #     name='scatter_add',
+    # ),
     jax.lax.stop_gradient_p: warp_without_fwd_laplacian(jax.lax.stop_gradient),
     jax.lax.eq_p: warp_without_fwd_laplacian(jax.lax.eq),
     jax.lax.lt_p: warp_without_fwd_laplacian(jax.lax.lt),
