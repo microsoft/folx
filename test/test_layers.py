@@ -12,6 +12,7 @@ from folx import (
     deregister_function,
     register_function,
 )
+from folx.api import FwdLaplArray
 
 from laplacian_testcase import LaplacianTestCase
 
@@ -103,15 +104,27 @@ class TestForwardLaplacian(LaplacianTestCase):
 
         @jax.jit
         def f(x):
-            return jnp.linalg.slogdet(jnp.tanh(x.reshape(16, 16) @ w))[1]
+            return jnp.linalg.slogdet(jnp.tanh(x.reshape(16, 16) @ w))
 
         for sparsity in [0, x.size]:
             with self.subTest(sparsity=sparsity):
-                y = jax.jit(forward_laplacian(f, sparsity))(x)
-                self.assertEqual(y.x.shape, f(x).shape)
-                self.assert_allclose(y.x, f(x))
-                self.assert_allclose(y.jacobian.dense_array, self.jacobian(f, x).T)
-                self.assert_allclose(y.laplacian, self.laplacian(f, x))
+                sign_y, log_y = jax.jit(forward_laplacian(f, sparsity))(x)
+                self.assertEqual(log_y.x.shape, f(x)[1].shape)
+                self.assert_allclose(log_y.x, f(x)[1])
+                self.assert_allclose(
+                    log_y.jacobian.dense_array, self.jacobian(f, x)[1].T
+                )
+                self.assert_allclose(log_y.laplacian, self.laplacian(f, x)[1])
+
+                self.assertEqual(sign_y.shape, log_y.x.shape)
+                if test_complex:
+                    self.assertIsInstance(sign_y, FwdLaplArray)
+                    self.assert_allclose(
+                        sign_y.jacobian.dense_array, self.jacobian(f, x)[0].T
+                    )
+                    self.assert_allclose(sign_y.laplacian, self.laplacian(f, x)[0])
+                else:
+                    self.assertIsInstance(sign_y, jax.Array)
 
     def test_custom_hessian(self):
         x = np.random.normal(size=(16,))
