@@ -146,7 +146,7 @@ def slogdet_jvp(primals, tangents):
     jacobians = jnp.linalg.inv(primals)
 
     def custom_jvp(jacobian, tangent, sign):
-        jac_dot_tangent = jnp.vdot(jacobian.T, tangent)
+        jac_dot_tangent = jnp.vdot(jacobian.T.conj(), tangent)
         if jac_dot_tangent.dtype in (jnp.complex64, jnp.complex128):
             sign_jvp = sign * -1j * jac_dot_tangent.imag
             log_det_jvp = jac_dot_tangent.real

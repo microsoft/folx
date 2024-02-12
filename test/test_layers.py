@@ -94,12 +94,7 @@ class TestForwardLaplacian(LaplacianTestCase):
                 self.assert_allclose(y.jacobian.dense_array, jac)
                 self.assert_allclose(y.laplacian, self.laplacian(f, (a, b)))
 
-    @parameterized.expand(
-        [
-            (False,),
-            # (True,)
-        ]
-    )
+    @parameterized.expand([(False,), (True,)])
     def test_slogdet(self, test_complex: bool):
         x = np.random.normal(size=(16 * 16))
         w = np.random.normal(size=(16, 16))
