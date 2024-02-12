@@ -53,11 +53,16 @@ class TestForwardLaplacian(LaplacianTestCase):
                     y.jacobian.dense_array.shape,
                     self.jacobian(attention, x).reshape(-1).shape,
                 )
-                self.assert_allclose(y.x, attention(x))
+                # These checks are numerically a bit more unstable so we allow higher tolerances here
+                self.assert_allclose(y.x, attention(x), rtol=1e-5)
                 self.assert_allclose(
-                    y.jacobian.dense_array, self.jacobian(attention, x).reshape(-1)
+                    y.jacobian.dense_array,
+                    self.jacobian(attention, x).reshape(-1),
+                    rtol=1e-5,
                 )
-                self.assert_allclose(y.laplacian, self.laplacian(attention, x))
+                self.assert_allclose(
+                    y.laplacian, self.laplacian(attention, x), rtol=1e-5
+                )
 
 
 if __name__ == '__main__':

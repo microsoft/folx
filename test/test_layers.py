@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
+from parameterized import parameterized
 
 from folx import (
     forward_laplacian,
@@ -11,12 +12,19 @@ from folx import (
     deregister_function,
     register_function,
 )
+from folx.api import FwdLaplArray
 
 from laplacian_testcase import LaplacianTestCase
 
 
 class TestForwardLaplacian(LaplacianTestCase):
-    def test_elementwise(self):
+    @parameterized.expand(
+        [
+            (False,),
+            (True,),
+        ]
+    )
+    def test_elementwise(self, test_complex: bool):
         functions = [
             jnp.sin,
             jnp.cos,
@@ -27,7 +35,9 @@ class TestForwardLaplacian(LaplacianTestCase):
             jnp.square,
             jnp.abs,
         ]
-        x = np.random.randn(10) ** 2
+        x = np.random.randn(10)
+        if test_complex:
+            x = 1j * x
         for f in functions:
             for sparsity in [0, x.size]:
                 with self.subTest(sparsity=sparsity, f=f):
@@ -37,13 +47,26 @@ class TestForwardLaplacian(LaplacianTestCase):
                     self.assert_allclose(y.jacobian.dense_array, self.jacobian(f, x).T)
                     self.assert_allclose(y.laplacian, self.laplacian(f, x))
 
-    def test_matmul(self):
+    @parameterized.expand(
+        [
+            (False, False),
+            (False, True),
+            (True, False),
+            (True, True),
+        ]
+    )
+    def test_matmul(self, left_complex: bool, right_complex: bool):
         x = np.random.normal(size=(16,))
         w = np.random.normal(size=(16, 16))
 
         @jax.jit
         def f(x):
             return jnp.matmul(x, w)
+
+        if left_complex:
+            x = x * 1j
+        if right_complex:
+            w = w * 1j
 
         for sparsity in [0, x.size]:
             with self.subTest(sparsity=sparsity):
@@ -72,20 +95,36 @@ class TestForwardLaplacian(LaplacianTestCase):
                 self.assert_allclose(y.jacobian.dense_array, jac)
                 self.assert_allclose(y.laplacian, self.laplacian(f, (a, b)))
 
-    def test_slogdet(self):
+    @parameterized.expand([(False,), (True,)])
+    def test_slogdet(self, test_complex: bool):
         x = np.random.normal(size=(16 * 16))
+        w = np.random.normal(size=(16, 16))
+        if test_complex:
+            w = w + 1j * np.random.normal(size=(16, 16))
 
         @jax.jit
         def f(x):
-            return jnp.linalg.slogdet(x.reshape(16, 16))[1]
+            return jnp.linalg.slogdet(jnp.tanh(x.reshape(16, 16) @ w))
 
         for sparsity in [0, x.size]:
             with self.subTest(sparsity=sparsity):
-                y = jax.jit(forward_laplacian(f, sparsity))(x)
-                self.assertEqual(y.x.shape, f(x).shape)
-                self.assert_allclose(y.x, f(x))
-                self.assert_allclose(y.jacobian.dense_array, self.jacobian(f, x).T)
-                self.assert_allclose(y.laplacian, self.laplacian(f, x))
+                sign_y, log_y = jax.jit(forward_laplacian(f, sparsity))(x)
+                self.assertEqual(log_y.x.shape, f(x)[1].shape)
+                self.assert_allclose(log_y.x, f(x)[1])
+                self.assert_allclose(
+                    log_y.jacobian.dense_array, self.jacobian(f, x)[1].T
+                )
+                self.assert_allclose(log_y.laplacian, self.laplacian(f, x)[1])
+
+                self.assertEqual(sign_y.shape, log_y.x.shape)
+                if test_complex:
+                    self.assertIsInstance(sign_y, FwdLaplArray)
+                    self.assert_allclose(
+                        sign_y.jacobian.dense_array, self.jacobian(f, x)[0].T
+                    )
+                    self.assert_allclose(sign_y.laplacian, self.laplacian(f, x)[0])
+                else:
+                    self.assertIsInstance(sign_y, jax.Array)
 
     def test_custom_hessian(self):
         x = np.random.normal(size=(16,))

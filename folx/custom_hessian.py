@@ -1,6 +1,8 @@
 import jax
 import jax.numpy as jnp
 
+from folx.ad import is_tree_complex
+
 from .api import Array, ExtraArgs, FwdLaplArgs, MergeFn, JAC_DIM
 from .utils import trace_of_product
 
@@ -56,4 +58,9 @@ def slogdet_jac_hessian_jac(
         return None, elementwise(*x)
 
     signs, flat_out = jax.lax.scan(scan_wrapper, None, (A_inv, J))[1]
-    return signs.reshape(leading_dims), flat_out.reshape(leading_dims)
+    sign_out, log_abs_out = signs.reshape(leading_dims), flat_out.reshape(leading_dims)
+
+    if is_tree_complex(A):
+        # this is not the real Tr(JHJ^T) but a cached value we use later to compute the Tr(JHJ^T)
+        return log_abs_out, log_abs_out.real
+    return sign_out, log_abs_out.real

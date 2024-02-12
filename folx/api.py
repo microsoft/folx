@@ -151,7 +151,7 @@ class FwdJacobian(NamedTuple):
         if idx is None:
             return self.dense_array
         if len(idx) == 0:
-            return jnp.zeros((*self.data_shape, 0))
+            return jnp.zeros((*self.data_shape, 0), dtype=self.data.dtype)
         if self.x0_idx is None:
             return self.data[idx]
         return self.materialize_for_idx(self.get_index_mask(idx), len(idx))
@@ -233,6 +233,9 @@ class FwdJacobian(NamedTuple):
     def imag(self):
         return FwdJacobian(self.data.imag, self.x0_idx)
 
+    def conj(self):
+        return FwdJacobian(self.data.conj(), self.x0_idx)
+
 
 class FwdLaplArray(NamedTuple):
     """
@@ -295,6 +298,9 @@ class FwdLaplArray(NamedTuple):
     @property
     def imag(self):
         return FwdLaplArray(self.x.imag, self.jacobian.imag, self.laplacian.imag)
+
+    def conj(self):
+        return FwdLaplArray(self.x.conj(), self.jacobian.conj(), self.laplacian.conj())
 
 
 def IS_LPL_ARR(x):

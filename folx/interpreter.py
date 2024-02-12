@@ -161,8 +161,8 @@ def eval_jaxpr_with_forward_laplacian(
 
     def eval_laplacian(eqn: core.JaxprEqn, invals):
         subfuns, params = eqn.primitive.get_bind_params(eqn.params)
-        fn = get_laplacian(eqn.primitive, True)
         with LoggingPrefix(f'({summarize(eqn.source_info)})'):
+            fn = get_laplacian(eqn.primitive, True)
             return fn(
                 (*subfuns, *invals), params, sparsity_threshold=sparsity_threshold
             )
@@ -219,12 +219,18 @@ def init_forward_laplacian_state(
     x_flat, unravel = ravel(x)
     jac = jtu.tree_map(jnp.ones_like, x)
     jac_idx = unravel(np.arange(x_flat.shape[0]))
+    if jnp.iscomplexobj(x_flat):
+        logging.info(
+            '[folx] Found complex input. This is not well supported, results might be wrong.'
+        )
     if sparsity:
         jac = jtu.tree_map(
-            lambda j, i: FwdJacobian(j[None], np.array(i)[None]), jac, jac_idx
+            lambda j, i: FwdJacobian(j.astype(x_flat.dtype)[None], np.array(i)[None]),
+            jac,
+            jac_idx,
         )
     else:
-        jac = jax.vmap(unravel)(jnp.eye(len(x_flat)))
+        jac = jax.vmap(unravel)(jnp.eye(len(x_flat), dtype=x_flat.dtype))
         jac = jtu.tree_map(FwdJacobian.from_dense, jac)
     lapl_x = jtu.tree_map(jnp.zeros_like, x)
     return jtu.tree_map(FwdLaplArray, x, jac, lapl_x)

@@ -39,3 +39,16 @@ class TestComplexFwdLapl(LaplacianTestCase):
         self.assert_allclose(y.x, f(x))
         self.assert_allclose(y.jacobian.dense_array, self.jacobian(f, x).T)
         self.assert_allclose(y.laplacian, self.laplacian(f, x))
+
+    def test_complex_abs(self):
+        x = np.random.randn(10)
+        W = np.random.randn(10, 10) + 1j * np.random.randn(10, 10)
+
+        def f(x):
+            return jnp.abs(jnp.tanh(x @ W))
+
+        y = forward_laplacian(f, 0)(x)
+        self.assertEqual(y.x.shape, x.shape)
+        self.assert_allclose(y.x, f(x))
+        self.assert_allclose(y.jacobian.dense_array, self.jacobian(f, x).T)
+        self.assert_allclose(y.laplacian, self.laplacian(f, x))
