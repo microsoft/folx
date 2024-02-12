@@ -313,6 +313,8 @@ _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
         flags=FunctionFlags.INDEXING | FunctionFlags.SCATTER,
         name='scatter',
     ),
+    # The current scatter implementation is frequently slower than the naive approach.
+    # TODO: add scatter-add back in once the scatter implementation improves.
     # jax.lax.scatter_add_p: wrap_forward_laplacian(
     #     jax.lax.scatter_add_p.bind,
     #     flags=FunctionFlags.LINEAR | FunctionFlags.SCATTER,
