@@ -7,6 +7,8 @@ import jax.numpy as jnp
 import jax.tree_util as jtu
 from jax.core import Primitive
 
+from folx.ad import is_tree_complex
+
 from .api import (
     Array,
     ArrayOrFwdLaplArray,
@@ -16,7 +18,11 @@ from .api import (
     PyTree,
 )
 from .custom_hessian import slogdet_jac_hessian_jac
-from .wrapper import wrap_forward_laplacian, warp_without_fwd_laplacian
+from .wrapper import (
+    wrap_elementwise,
+    wrap_forward_laplacian,
+    warp_without_fwd_laplacian,
+)
 
 R = TypeVar('R', bound=PyTree[Array])
 P = ParamSpec('P')
@@ -142,10 +148,12 @@ def slogdet_jvp(primals, tangents):
     def custom_jvp(jacobian, tangent, sign):
         jac_dot_tangent = jnp.vdot(jacobian.T, tangent)
         if jac_dot_tangent.dtype in (jnp.complex64, jnp.complex128):
-            sign_jvp = sign * 1j * jac_dot_tangent.imag
+            sign_jvp = sign * -1j * jac_dot_tangent.imag
+            log_det_jvp = jac_dot_tangent.real
         else:
             sign_jvp = jnp.zeros(())
-        return (sign_jvp, jac_dot_tangent.real)
+            log_det_jvp = jac_dot_tangent
+        return (sign_jvp, log_det_jvp)
 
     y_tangent = jax.vmap(custom_jvp)(jacobians, tangents, sign)
 
@@ -166,34 +174,35 @@ def slogdet_wrapper(
     )
     sign, logdet = fwd_lapl_fn(x, {}, sparsity_threshold=0)
     # Remove the jacobian of the sign
-    if jax.dtypes.issubdtype(sign.dtype, jnp.complexfloating):
+    if jax.dtypes.issubdtype(sign.dtype, jnp.floating):
         sign = sign.x
     return sign, logdet
 
 
-def imag_wrapper(
+def abs_wrapper(
     x: tuple[ArrayOrFwdLaplArray],
     kwargs: dict[str, Any],
     sparsity_threshold: int,
 ):
-    return x[0].imag
+    if not is_tree_complex(x):
+        return wrap_forward_laplacian(
+            jax.lax.abs, flags=FunctionFlags.LINEAR, in_axes=()
+        )(x, kwargs, sparsity_threshold)
+    import folx  # we must import folx here to avoid circular imports
 
-
-def real_wrapper(
-    x: tuple[ArrayOrFwdLaplArray],
-    kwargs: dict[str, Any],
-    sparsity_threshold: int,
-):
-    return x[0].real
+    return folx.forward_laplacian(
+        lambda x: jnp.sqrt((x * x.conj()).real),
+        sparsity_threshold=sparsity_threshold,
+        disable_jit=True,
+    )(x[0])
 
 
 _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
-    jax.lax.imag_p: imag_wrapper,
-    jax.lax.real_p: real_wrapper,
+    jax.lax.conj_p: wrap_elementwise(jnp.conj),
+    jax.lax.imag_p: wrap_elementwise(jnp.imag),
+    jax.lax.real_p: wrap_elementwise(jnp.real),
     jax.lax.dot_general_p: dot_general,
-    jax.lax.abs_p: wrap_forward_laplacian(
-        jax.lax.abs, flags=FunctionFlags.LINEAR, in_axes=()
-    ),
+    jax.lax.abs_p: abs_wrapper,
     jax.lax.neg_p: wrap_forward_laplacian(
         jax.lax.neg, flags=FunctionFlags.LINEAR, in_axes=()
     ),

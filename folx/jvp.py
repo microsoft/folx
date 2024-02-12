@@ -116,7 +116,7 @@ def sparse_diag_jvp(
     ):
         # If we have elementwise functions, we can just compute the full jacobian and
         # do the operations a bit faster.
-        jac = jax.grad(lambda x: jnp.sum(fwd(x)))(laplace_args.x[0])  # type: ignore
+        jac = vjp(fwd, laplace_args.x[0])(jnp.ones_like(y))[0]
         grad_y = jac * laplace_args.jacobian[0].data
         lapl_y = jac * laplace_args.laplacian[0]
     else:

@@ -14,6 +14,7 @@ from .api import (
     ForwardLaplacian,
     ForwardLaplacianFns,
     FunctionFlags,
+    FwdJacobian,
     FwdLaplArgs,
     FwdLaplArray,
     MergeFn,
@@ -121,9 +122,7 @@ def wrap_forward_laplacian(
             lapl_y, lapl_fns.jac_hessian_jac_trace(laplace_args, sparsity_threshold)
         )
         return jax.tree_util.tree_map(
-            lambda x, jac, lapl: FwdLaplArray(
-                x, jac.astype(x.dtype), lapl.astype(x.dtype)
-            ),
+            lambda x, jac, lapl: FwdLaplArray(x, jac, lapl).astype(x.dtype),
             y,
             grad_y,
             lapl_y,
@@ -144,5 +143,27 @@ def warp_without_fwd_laplacian(fn) -> ForwardLaplacian:
             is_leaf=IS_LPL_ARR,
         )
         return fn(*args, **kwargs)
+
+    return wrapped
+
+
+def wrap_elementwise(fn) -> ForwardLaplacian:
+    """
+    Decorator that applies the function directly to the data, jacobian and laplacian.
+    """
+
+    def wrapped(args, kwargs, sparsity_threshold: int):
+        assert len(args) == 1
+
+        def inner(x: ArrayOrFwdLaplArray):
+            if isinstance(x, FwdLaplArray):
+                return FwdLaplArray(
+                    fn(x.x),
+                    FwdJacobian(fn(x.jacobian.data), x.jacobian.x0_idx),
+                    fn(x.laplacian),
+                )
+            return fn(x)
+
+        return inner(args[0])
 
     return wrapped

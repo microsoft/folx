@@ -225,7 +225,7 @@ def init_forward_laplacian_state(
         )
     if sparsity:
         jac = jtu.tree_map(
-            lambda j, i: FwdJacobian(j[None], np.array(i, dtype=j.dtype)[None]),
+            lambda j, i: FwdJacobian(j.astype(x_flat.dtype)[None], np.array(i)[None]),
             jac,
             jac_idx,
         )

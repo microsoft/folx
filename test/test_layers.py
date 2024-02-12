@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
+from parameterized import parameterized
 
 from folx import (
     forward_laplacian,
@@ -16,7 +17,13 @@ from laplacian_testcase import LaplacianTestCase
 
 
 class TestForwardLaplacian(LaplacianTestCase):
-    def test_elementwise(self):
+    @parameterized.expand(
+        [
+            (False,),
+            (True,),
+        ]
+    )
+    def test_elementwise(self, test_complex: bool):
         functions = [
             jnp.sin,
             jnp.cos,
@@ -27,7 +34,9 @@ class TestForwardLaplacian(LaplacianTestCase):
             jnp.square,
             jnp.abs,
         ]
-        x = np.random.randn(10) ** 2
+        x = np.random.randn(10)
+        if test_complex:
+            x = 1j * x
         for f in functions:
             for sparsity in [0, x.size]:
                 with self.subTest(sparsity=sparsity, f=f):
@@ -37,13 +46,26 @@ class TestForwardLaplacian(LaplacianTestCase):
                     self.assert_allclose(y.jacobian.dense_array, self.jacobian(f, x).T)
                     self.assert_allclose(y.laplacian, self.laplacian(f, x))
 
-    def test_matmul(self):
+    @parameterized.expand(
+        [
+            (False, False),
+            (False, True),
+            (True, False),
+            (True, True),
+        ]
+    )
+    def test_matmul(self, left_complex: bool, right_complex: bool):
         x = np.random.normal(size=(16,))
         w = np.random.normal(size=(16, 16))
 
         @jax.jit
         def f(x):
             return jnp.matmul(x, w)
+
+        if left_complex:
+            x = x * 1j
+        if right_complex:
+            w = w * 1j
 
         for sparsity in [0, x.size]:
             with self.subTest(sparsity=sparsity):
@@ -72,9 +94,17 @@ class TestForwardLaplacian(LaplacianTestCase):
                 self.assert_allclose(y.jacobian.dense_array, jac)
                 self.assert_allclose(y.laplacian, self.laplacian(f, (a, b)))
 
-    def test_slogdet(self):
+    @parameterized.expand(
+        [
+            (False,),
+            # (True,)
+        ]
+    )
+    def test_slogdet(self, test_complex: bool):
         x = np.random.normal(size=(16 * 16))
         w = np.random.normal(size=(16, 16))
+        if test_complex:
+            w = w + 1j * np.random.normal(size=(16, 16))
 
         @jax.jit
         def f(x):
