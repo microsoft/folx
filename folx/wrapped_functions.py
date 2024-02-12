@@ -14,6 +14,7 @@ from .api import (
     ArrayOrFwdLaplArray,
     ForwardLaplacian,
     FunctionFlags,
+    FwdJacobian,
     FwdLaplArray,
     PyTree,
 )
@@ -148,7 +149,8 @@ def slogdet_jvp(primals, tangents):
     def custom_jvp(jacobian, tangent, sign):
         jac_dot_tangent = jnp.vdot(jacobian.T.conj(), tangent)
         if jac_dot_tangent.dtype in (jnp.complex64, jnp.complex128):
-            sign_jvp = sign * 1j * jac_dot_tangent.imag
+            # this is not the real jvp but a cached value to ease the Tr(JHJ^T) computation
+            sign_jvp = jac_dot_tangent
             log_det_jvp = jac_dot_tangent.real
         else:
             sign_jvp = jnp.zeros(())
@@ -174,6 +176,15 @@ def slogdet_wrapper(
     )
     sign, logdet = fwd_lapl_fn(x, {}, sparsity_threshold=0)
     # Remove the jacobian of the sign
+    if jax.dtypes.issubdtype(sign.dtype, jnp.complexfloating):
+        sign_jac = sign.jacobian.data
+        sign_jac_flat = sign_jac.reshape(-1, *sign.shape).imag
+        sign_jac_dot = jnp.einsum('i...,i...->...', sign_jac_flat, sign_jac_flat)
+        sign = FwdLaplArray(
+            sign.x,
+            FwdJacobian(1.0j * sign.x * sign_jac.imag, x0_idx=sign.jacobian.x0_idx),
+            sign.x * (1.0j * sign.laplacian.imag - sign_jac_dot),
+        )
     if jax.dtypes.issubdtype(sign.dtype, jnp.floating):
         sign = sign.x
     return sign, logdet
