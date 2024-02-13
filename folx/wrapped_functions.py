@@ -199,13 +199,11 @@ def abs_wrapper(
         return wrap_forward_laplacian(
             jax.lax.abs, flags=FunctionFlags.LINEAR, in_axes=()
         )(x, kwargs, sparsity_threshold)
-    import folx  # we must import folx here to avoid circular imports
 
-    return folx.forward_laplacian(
-        lambda x: jnp.sqrt((x * x.conj()).real),
-        sparsity_threshold=sparsity_threshold,
-        disable_jit=True,
-    )(x[0])
+    return wrap_forward_laplacian(
+        jax.lax.abs,
+        in_axes=(),
+    )(x, kwargs, sparsity_threshold)
 
 
 _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
