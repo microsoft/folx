@@ -314,12 +314,12 @@ _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
         name='scatter',
     ),
     # The current scatter implementation is frequently slower than the naive approach.
-    # TODO: add scatter-add back in once the scatter implementation improves.
-    # jax.lax.scatter_add_p: wrap_forward_laplacian(
-    #     jax.lax.scatter_add_p.bind,
-    #     flags=FunctionFlags.LINEAR | FunctionFlags.SCATTER,
-    #     name='scatter_add',
-    # ),
+    # TODO: add scatter flag back in once the scatter implementation improves.
+    jax.lax.scatter_add_p: wrap_forward_laplacian(
+        jax.lax.scatter_add_p.bind,
+        flags=FunctionFlags.LINEAR,
+        name='scatter_add',
+    ),
     jax.lax.stop_gradient_p: warp_without_fwd_laplacian(jax.lax.stop_gradient),
     jax.lax.eq_p: warp_without_fwd_laplacian(jax.lax.eq),
     jax.lax.lt_p: warp_without_fwd_laplacian(jax.lax.lt),
