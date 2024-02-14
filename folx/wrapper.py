@@ -1,7 +1,9 @@
 import functools
+import warnings
 from typing import Any, ParamSpec, TypeVar
 
 import jax
+from jax.numpy import ComplexWarning
 
 from .api import (
     IS_LPL_ARR,
@@ -121,12 +123,17 @@ def wrap_forward_laplacian(
         lapl_y = tree_add(
             lapl_y, lapl_fns.jac_hessian_jac_trace(laplace_args, sparsity_threshold)
         )
-        return jax.tree_util.tree_map(
-            lambda x, jac, lapl: FwdLaplArray(x, jac, lapl).astype(x.dtype),
-            y,
-            grad_y,
-            lapl_y,
-        )
+        # TODO: The type casting is a temporary fix. For functions mapping from complex
+        # to reals, this might be wrong. It is guaranteed to be correct if complex numbers
+        # only occur in intermediate steps.
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', ComplexWarning)
+            return jax.tree_util.tree_map(
+                lambda x, jac, lapl: FwdLaplArray(x, jac, lapl).astype(x.dtype),
+                y,
+                grad_y,
+                lapl_y,
+            )
 
     return new_fn
 

@@ -37,6 +37,39 @@ from .utils import (
 from .ad import hessian, jacrev
 
 
+def JHJ_via_hessian(flat_fn: Callable, flat_x: Array, grad_2d: Array):
+    # We directly compute the hessian and then the trace of the product.
+    flat_hessian = hessian(flat_fn)(flat_x)
+    return trace_of_product(flat_hessian, grad_2d @ grad_2d.T)
+
+
+def JHJ_via_trace(flat_fn: Callable, flat_x: Array, grad_2d: Array):
+    # Directly copmute the trace of tr(HJJ^T)=tr(J^THJ)
+    @functools.partial(jax.vmap, in_axes=-1, out_axes=-1)
+    def vhvp(tangent):
+        def vjp(x):
+            @functools.partial(jax.vmap, in_axes=(None, -1), out_axes=-1)
+            def jvp(x, tangent):
+                return jax.jvp(flat_fn, (x,), (tangent,))[1]
+
+            return jvp(x, grad_2d)
+
+        return jax.jvp(vjp, (flat_x,), (tangent,))[1]
+
+    return jnp.trace(vhvp(grad_2d), axis1=-2, axis2=-1)
+
+
+def JHJ_via_hvp(flat_fn: Callable, flat_x: Array, grad_2d: Array):
+    # Implementation where we compute HJ and then the trace via
+    # the sum of hadamard product
+    @functools.partial(jax.vmap, in_axes=-1, out_axes=-1)
+    def hvp(tangent):
+        return jax.jvp(jacrev(flat_fn), (flat_x,), (tangent,))[1]
+
+    HJ = hvp(grad_2d)  # N x D x K
+    return trace_of_product(HJ, grad_2d)
+
+
 def general_jac_hessian_jac(
     fn: ForwardFn, args: FwdLaplArgs, materialize_idx: Array | None
 ):
@@ -55,37 +88,20 @@ def general_jac_hessian_jac(
     # is the x0 dim and the second dim is the input dim.
     grads_2d = get_reduced_jacobians(*args.jacobian, idx=materialize_idx)
     grad_2d = jnp.concatenate([x.T for x in grads_2d], axis=0)
-    D, K = grad_2d.shape
-    if K > D:
-        # Fwd on Reverse AD
-        flat_hessian = hessian(flat_fn)(flat_x)
-        flat_out = trace_of_product(flat_hessian, grad_2d @ grad_2d.T)
-    elif D > K:
-        # Directly copmute the trace of tr(HJJ^T)=tr(J^THJ)
-        @functools.partial(jax.vmap, in_axes=-1, out_axes=-1)
-        def vhvp(tangent):
-            def vjp(x):
-                @functools.partial(jax.vmap, in_axes=(None, -1), out_axes=-1)
-                def jvp(x, tangent):
-                    return jax.jvp(flat_fn, (x,), (tangent,))[1]
+    jac_dim, inp_dim = grad_2d.shape
+    is_complex_to_real = jnp.iscomplexobj(flat_x) and not jnp.iscomplexobj(out)
 
-                return jvp(x, grad_2d)
-
-            return jax.jvp(vjp, (flat_x,), (tangent,))[1]
-
-        flat_out = jnp.trace(vhvp(grad_2d), axis1=-2, axis2=-1)
+    if inp_dim > jac_dim:
+        if is_complex_to_real:
+            # Materializing the Hessian for a complex to real function is not supported.
+            # We avoid this by only performing HvJ products.
+            flat_out = JHJ_via_hvp(flat_fn, flat_x, grad_2d).real
+        else:
+            flat_out = JHJ_via_hessian(flat_fn, flat_x, grad_2d)
     else:
-        # Implementation where we compute HJ and then the trace via
-        # the sum of hadamard product
-        @functools.partial(jax.vmap, in_axes=-1, out_axes=-1)
-        def hvp(tangent):
-            def jacobian(x):
-                return jacrev(flat_fn)(x)
-
-            return jax.jvp(jacobian, (flat_x,), (tangent,))[1]
-
-        HJ = hvp(grad_2d)  # N x D x K
-        flat_out = trace_of_product(HJ, grad_2d)  # N x D x K and D x K
+        # Here we contract the Jacobian dimensions directly without computing the full Hessian.
+        # This might be more efficient if the Jacobian is large and the Hessian is small.
+        flat_out = JHJ_via_trace(flat_fn, flat_x, grad_2d)
     return unravel(flat_out)
 
 
