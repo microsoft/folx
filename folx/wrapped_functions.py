@@ -18,7 +18,7 @@ from .api import (
     FwdLaplArray,
     PyTree,
 )
-from .custom_hessian import slogdet_jac_hessian_jac
+from .custom_hessian import complex_abs_jac_hessian_jac, slogdet_jac_hessian_jac
 from .wrapper import (
     wrap_elementwise,
     wrap_forward_laplacian,
@@ -190,20 +190,39 @@ def slogdet_wrapper(
     return sign, logdet
 
 
+@jax.custom_jvp
+def complex_abs(x):
+    return jnp.abs(x)
+
+
+@complex_abs.defjvp
+def complex_abs_jvp(primals, tangents):
+    # This the standard JVP rule for the absolute value may cause
+    # numerical issues. We use the following rule instead:
+    # abs(x) = sqrt(x.real**2 + x.imag**2)
+    primals, tangents = primals[0], tangents[0]
+    y = complex_abs(primals)
+    if not is_tree_complex(primals):
+        return y, jnp.sign(primals) * tangents
+    y_tangent = (primals.real * tangents.real + primals.imag * tangents.imag) / y
+    return y, y_tangent
+
+
 def abs_wrapper(
     x: tuple[ArrayOrFwdLaplArray],
     kwargs: dict[str, Any],
     sparsity_threshold: int,
 ):
-    if not is_tree_complex(x):
+    if is_tree_complex(x):
         return wrap_forward_laplacian(
-            jax.lax.abs, flags=FunctionFlags.LINEAR, in_axes=()
+            complex_abs,
+            in_axes=(),
+            custom_jac_hessian_jac=complex_abs_jac_hessian_jac,
         )(x, kwargs, sparsity_threshold)
 
-    return wrap_forward_laplacian(
-        jax.lax.abs,
-        in_axes=(),
-    )(x, kwargs, sparsity_threshold)
+    return wrap_forward_laplacian(jax.lax.abs, flags=FunctionFlags.LINEAR, in_axes=())(
+        x, kwargs, sparsity_threshold
+    )
 
 
 _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {

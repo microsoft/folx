@@ -64,3 +64,28 @@ def slogdet_jac_hessian_jac(
         # this is not the real Tr(JHJ^T) but a cached value we use later to compute the Tr(JHJ^T)
         return log_abs_out, log_abs_out.real
     return sign_out, log_abs_out.real
+
+
+def complex_abs_jac_hessian_jac(
+    args: FwdLaplArgs,
+    extra_args: ExtraArgs,
+    merge: MergeFn,
+    materialize_idx: Array | None,
+):
+    # The hessian of jnp.abs seems to be numerically unstable.
+    # Here we implement a custom rule based on
+    # abs(x) = sqrt(x.real^2 + x.imag^2)
+    assert len(args.x) == 1
+    # This function is applied elementwise
+    assert args.x[0].shape == ()
+
+    # For real numbers the Hessian is 0.
+    if not is_tree_complex(args.x):
+        return jnp.zeros(())
+
+    x, J = args.x[0], args.jacobian[0].data
+    y, J_abs = jnp.abs(x), jnp.abs(J)
+
+    x_J = x.real * J.real + x.imag * J.imag
+
+    return jnp.vdot(J_abs, J_abs) / y - jnp.vdot(x_J, x_J) / y**3
