@@ -54,7 +54,10 @@ def sparse_jvp(
         elif 'axis' in kwargs:
             axes = kwargs['axis']
     if axes is None:
-        axes = tuple(range(laplace_args.arrays[0].x.ndim))
+        ndims = set(x.ndim for x in laplace_args.x)
+        if len(ndims) != 1:
+            return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
+        axes = tuple(range(next(iter(ndims))))
     if isinstance(axes, int):
         axes = (axes,)
     if axes == () or np.array(axes).size == 0:
