@@ -1,10 +1,13 @@
+import functools
 import logging
 from typing import Sequence, Type, TypeVar
 
+import jax
 import jax.flatten_util as jfu
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
+from jax import core
 
 from .api import (
     JAC_DIM,
@@ -543,6 +546,27 @@ def extract_jacobian_mask(arrays: Sequence[ArrayOrFwdLaplArray]):
         ]
 
     return merge
+
+
+def broadcast_mask_to_jacobian(mask: PyTree[np.ndarray], jacobian: PyTree[Array]):
+    """
+    Broadcasts the given mask to the given jacobian.
+    """
+
+    def broadcast(m: np.ndarray, j: Array):
+        assert m.shape[JAC_DIM] == j.shape[JAC_DIM]
+        target_shape = list(j.shape)
+        del target_shape[JAC_DIM]
+        target_shape = tuple(target_shape)
+
+        @functools.partial(jax.vmap, in_axes=JAC_DIM, out_axes=JAC_DIM)
+        def brdcast(x):
+            return jnp.broadcast_to(x, target_shape)
+
+        with core.new_main(core.EvalTrace, dynamic=True):
+            return np.asarray(brdcast(m), dtype=m.dtype)
+
+    return jtu.tree_map(broadcast, mask, jacobian)
 
 
 class LoggingPrefix(logging.Formatter):
