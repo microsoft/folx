@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
 from jax import core
+from jax.typing import ArrayLike
 from jax.util import safe_map
 from jax._src.source_info_util import summarize
 
@@ -209,7 +210,7 @@ def eval_jaxpr_with_forward_laplacian(
 
 
 def init_forward_laplacian_state(
-    *x: PyTree[Array], sparsity: bool
+    *x: PyTree[Array], sparsity: bool, weights: PyTree[ArrayLike]
 ) -> PyTree[FwdLaplArray]:
     """
     Initialize forward Laplacian state from a PyTree of arrays.
@@ -217,23 +218,29 @@ def init_forward_laplacian_state(
     if any(IS_LPL_ARR(x_) for x_ in jtu.tree_leaves(x, is_leaf=IS_LEAF)):
         return x
     x_flat, unravel = ravel(x)
-    jac = jtu.tree_map(jnp.ones_like, x)
+    if weights is None:
+        weights = 1.0
+
+    def init_weights(weight, tree):
+        return jtu.tree_map(
+            functools.partial(jnp.full_like, fill_value=weight),
+            tree,
+        )
+
+    jac = jtu.tree_map(init_weights, weights, x)
     jac_idx = unravel(np.arange(x_flat.shape[0]))
     if jnp.iscomplexobj(x_flat):
         logging.info(
             '[folx] Found complex input. This is not well supported, results might be wrong.'
         )
     if sparsity:
-        jac = jtu.tree_map(
-            lambda j, i: FwdJacobian(j.astype(x_flat.dtype)[None], np.array(i)[None]),
-            jac,
-            jac_idx,
-        )
+        jacobian = jtu.tree_map(FwdJacobian, jac, jac_idx)
+        jacobian = jtu.tree_map(lambda x: x[None], jacobian)
     else:
-        jac = jax.vmap(unravel)(jnp.eye(len(x_flat), dtype=x_flat.dtype))
-        jac = jtu.tree_map(FwdJacobian.from_dense, jac)
+        jacobian = jax.vmap(unravel)(jnp.diag(ravel(jac)[0]))
+        jacobian = jtu.tree_map(FwdJacobian.from_dense, jacobian)
     lapl_x = jtu.tree_map(jnp.zeros_like, x)
-    return jtu.tree_map(FwdLaplArray, x, jac, lapl_x)
+    return jtu.tree_map(FwdLaplArray, x, jacobian, lapl_x)
 
 
 def forward_laplacian(
@@ -254,7 +261,15 @@ def forward_laplacian(
             If enabling sparsity, we recommend relatively large values like 0.6 as frequent materializations are slow.
     """
 
-    def wrapped(*args: P.args, **kwargs: P.kwargs):
+    def wrapped(*args: P.args, weights: PyTree[ArrayLike] = 1.0, **kwargs: P.kwargs):
+        """
+        Wraps the function and computes the Laplacian.
+
+        Args:
+            - args: positional arguments to the function
+            - weights: weights for the arguments to the function must be tree broadcastable (like vmap) of the input arguments
+            - kwargs: keyword arguments to the function
+        """
         args_arr = jtu.tree_map(
             lambda x: x.x if IS_LPL_ARR(x) else x, args, is_leaf=IS_LEAF
         )
@@ -264,7 +279,9 @@ def forward_laplacian(
             threshold = int(sparsity_threshold * sum(x.size for x in flat_args))
         else:
             threshold = int(sparsity_threshold)
-        lapl_args = init_forward_laplacian_state(*flat_args, sparsity=threshold > 0)
+        lapl_args = init_forward_laplacian_state(
+            *flat_args, sparsity=threshold > 0, weights=weights
+        )
         out = eval_jaxpr_with_forward_laplacian(
             closed_jaxpr.jaxpr,
             closed_jaxpr.literals,

@@ -30,14 +30,15 @@ class TestForwardLaplacian(LaplacianTestCase):
             jnp.cos,
             jnp.tanh,
             jnp.exp,
-            jnp.log,
-            jnp.sqrt,
             jnp.square,
             jnp.abs,
+            # These functions only work on positive numbers
+            lambda x: jnp.log(jnp.abs(x)),
+            lambda x: jnp.sqrt(jnp.abs(x)),
         ]
         x = np.random.randn(10)
         if test_complex:
-            x = 1j * x
+            x = x + 1j * np.random.randn(10)
         for f in functions:
             for sparsity in [0, x.size]:
                 with self.subTest(sparsity=sparsity, f=f):
