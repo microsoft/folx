@@ -25,6 +25,7 @@ from .tree_utils import tree_concat, tree_expand, tree_take
 from .utils import (
     broadcast_except,
     broadcast_dim,
+    broadcast_mask_to_jacobian,
     extend_jacobians,
     get_jacobian_for_reduction,
     np_concatenate_brdcast,
@@ -98,7 +99,7 @@ def sparse_jvp(
     grad_y = tree_take(y_tangent, slice(None, -1), axis=JAC_DIM)
     lapl_y = tree_take(y_tangent, -1, axis=JAC_DIM)
 
-    new_masks = jtu.tree_map(lambda m, g: np.broadcast_to(m, g.shape), out_mask, grad_y)
+    new_masks = broadcast_mask_to_jacobian(out_mask, grad_y)
     assert grad_y.shape == new_masks.shape, f'{grad_y.shape} != {new_masks.shape}'
 
     grad_y = jtu.tree_map(FwdJacobian, grad_y, new_masks)
@@ -163,9 +164,7 @@ def sparse_diag_jvp(
 
     # We need to broadcast the output mask to the shape of the gradient in case the operation
     # included some broadcasting, e.g., (10, 1) * (5,) -> (10, 5)
-    result_mask = jtu.tree_map(
-        lambda m, g: np.broadcast_to(m, g.shape), result_mask, grad_y
-    )
+    result_mask = broadcast_mask_to_jacobian(result_mask, grad_y)
     assert grad_y.shape == result_mask.shape, f'{grad_y.shape} != {result_mask.shape}'
 
     grad_y = jtu.tree_map(FwdJacobian, grad_y, result_mask)
