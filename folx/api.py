@@ -256,6 +256,10 @@ class FwdLaplArray(NamedTuple):
         return self.x.ndim
 
     @property
+    def size(self):
+        return self.x.size
+
+    @property
     def dense_jacobian(self):
         return self.jacobian.dense_array
 
