@@ -147,6 +147,19 @@ To be able to recreate the larger `(m,n)` array from the `(m,d)` array, we addit
 
 Masks are treated as compile time static and will be traced automatically. If the tracing is not possible, e.g., due to data dependent indexing, we will fall back to a dense implementation. These propagation rules are implemented in `jvp.py`.
 
+### Memory efficiency
+The forward laplacian uses more GPU memory due to the full materialization of the Jacobian matrix.
+To compensate for this, it is recommended to loop over the batch size (while other implementations typically loop over the Hessian).
+We provide an easy to use utility for this via `folx.batched_vmap` which functions like `jax.vmap` but chunks the input into batches and operates on these sequentially.
+```python
+from folx import batched_vmap
+
+def f(x):
+    return x**2
+
+batched_f = batched_vmap(f, max_batch_size=64)
+```
+
 ##### Omnistaging
 If arrays do not depend on the initial input, they are typically still traced to better optimize the final program. This is called [omnistaging](https://github.com/google/jax/pull/3370). While this generally is beneficial, it does not allow us to perform indexing as tracer hide the actual data. 
 So, if we use sparsity we want to compute all arrays that do not explicitly depend on the input such that we could use them for index operations.
@@ -161,11 +174,11 @@ with core.new_main(core.EvalTrace, dynamic=True):
 ## Citation
 If you find work helpful, please consider citing it as
 ```
-@software{folx2023gao,
-  author = {Nichoals Gao and Jonas Köhler and Adam Foster},
+@software{gao2023folx,
+  author = {Nicholas Gao and Jonas Köhler and Adam Foster},
   title = {folx - Forward Laplacian for JAX},
   url = {http://github.com/microsoft/folx},
-  version = {0.2.0},
+  version = {0.2.5},
   year = {2023},
 }
 ```
