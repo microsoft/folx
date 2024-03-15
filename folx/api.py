@@ -5,7 +5,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import numpy.typing as npt
-from jax import core
 from jaxtyping import Array, PyTree
 
 T = TypeVar('T', bound=PyTree[Array])
@@ -131,7 +130,7 @@ class FwdJacobian(NamedTuple):
             return indices
 
         if isinstance(outputs, np.ndarray):
-            with core.new_main(core.EvalTrace, dynamic=True):
+            with jax.ensure_compile_time_eval():
                 result = np.asarray(get_indices(flat_mask, flat_outputs), dtype=int).T
         else:
             result = get_indices(flat_mask, flat_outputs).T
@@ -390,8 +389,7 @@ ForwardFn = Callable[..., ArrayOrArrays]
 
 
 class MergeFn(Protocol):
-    def __call__(self, args: Arrays, extra: ExtraArgs) -> Arrays:
-        ...
+    def __call__(self, args: Arrays, extra: ExtraArgs) -> Arrays: ...
 
 
 class ForwardLaplacianFns(NamedTuple):
@@ -403,8 +401,7 @@ class ForwardLaplacianFns(NamedTuple):
 
 
 class JvpFn(Protocol):
-    def __call__(self, primals: Arrays, tangents: Arrays) -> tuple[Array, Array]:
-        ...
+    def __call__(self, primals: Arrays, tangents: Arrays) -> tuple[Array, Array]: ...
 
 
 class CustomTraceJacHessianJac(Protocol):
@@ -414,8 +411,7 @@ class CustomTraceJacHessianJac(Protocol):
         extra_args: ExtraArgs,
         merge: MergeFn,
         materialize_idx: Array,
-    ) -> PyTree[Array]:
-        ...
+    ) -> PyTree[Array]: ...
 
 
 class ForwardLaplacian(Protocol):
@@ -424,8 +420,7 @@ class ForwardLaplacian(Protocol):
         args: tuple[ArrayOrFwdLaplArray],
         kwargs: dict[str, Any],
         sparsity_threshold: int,
-    ) -> PyTree[ArrayOrFwdLaplArray]:
-        ...
+    ) -> PyTree[ArrayOrFwdLaplArray]: ...
 
 
 class FunctionFlags(IntFlag):

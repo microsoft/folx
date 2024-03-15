@@ -180,7 +180,7 @@ def eval_jaxpr_with_forward_laplacian(
             # https://github.com/google/jax/pull/3370
             if all(not isinstance(x, core.Tracer) for x in invals) and enable_sparsity:
                 try:
-                    with core.new_main(core.EvalTrace, dynamic=True):
+                    with jax.ensure_compile_time_eval():
                         outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
                 except Exception as e:
                     with LoggingPrefix(f'({summarize(eqn.source_info)})'):

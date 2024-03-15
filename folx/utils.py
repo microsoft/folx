@@ -7,7 +7,6 @@ import jax.flatten_util as jfu
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
-from jax import core
 
 from .api import (
     JAC_DIM,
@@ -563,7 +562,7 @@ def broadcast_mask_to_jacobian(mask: PyTree[np.ndarray], jacobian: PyTree[Array]
         def brdcast(x):
             return jnp.broadcast_to(x, target_shape)
 
-        with core.new_main(core.EvalTrace, dynamic=True):
+        with jax.ensure_compile_time_eval():
             return np.asarray(brdcast(m), dtype=m.dtype)
 
     return jtu.tree_map(broadcast, mask, jacobian)

@@ -8,7 +8,6 @@ import jax.numpy as jnp
 import jax.tree_util as jtu
 import jaxlib.xla_extension
 import numpy as np
-from jax import core
 
 from .api import (
     JAC_DIM,
@@ -206,7 +205,7 @@ def find_materialization_idx(
         return None
     # TODO: Rewrite this!! This is quity messy and inefficient.
     # it assumes that we're only interested in the last dimension.
-    with core.new_main(core.EvalTrace, dynamic=True):
+    with jax.ensure_compile_time_eval():
         vmap_seq, (inp,) = vmap_sequences_and_squeeze(
             ([j.mask for j in lapl_args.jacobian],),
             (

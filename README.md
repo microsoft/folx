@@ -4,7 +4,7 @@ This submodule implements the forward laplacian from https://arxiv.org/abs/2307.
 
 ## Install
 
-Either clone repo and install locally via 
+Either clone repo and install locally via
 ```bash
 poetry install
 ```
@@ -34,7 +34,7 @@ result.laplacian # tr(H_f(x)) 6
 ```
 
 ## Introduction
-To avoid custom wrappers for all of JAX's commands, the forward laplacian is implemented as custom interpreter for Jaxpr. 
+To avoid custom wrappers for all of JAX's commands, the forward laplacian is implemented as custom interpreter for Jaxpr.
 This means if you have a function
 ```python
 class Fn(Protocol):
@@ -47,7 +47,7 @@ class LaplacianFn(Protocol):
     def __call__(self, *args: PyTree[Array]) -> PyTree[FwdLaplArray]:
         ...
 ```
-where `FwdLaplArray` is a triplet of 
+where `FwdLaplArray` is a triplet of
 ```python
 FwdLaplArray.x # jax.Array f(x) f(x).shape
 FwdLaplArray.jacobian # FwdJacobian J_f(x)
@@ -77,7 +77,7 @@ But instead of using the [standard evaluation pipeline](https://github.com/googl
 
 ### Package structure
 The general structure of the package is
-* `interpreter.py` contains the evaluation of jaxpr and exported function decorator. 
+* `interpreter.py` contains the evaluation of jaxpr and exported function decorator.
 * `wrapper.py` contains subfunction decorator that maps a function that takes `jax.Array`s to a function that accepts `FwdLaplArray`s instead.
 * `wrapped_functions.py` contains a registry of predefined functions as well as utility functions to add new functions to the registry.
 * `jvp.py` contains logic for jacobian vector products.
@@ -86,13 +86,13 @@ The general structure of the package is
 * `api.py` contains general interfaces shared in the package.
 * `operators.py` contains a forward laplacian operator as well as alternatives.
 * `utils.py` contains several small utility functions.
-* `tree_utils.py` contains several utility functions for PyTrees. 
+* `tree_utils.py` contains several utility functions for PyTrees.
 * `vmap.py` contains a batched vmap implementation to reduce memory usage by going through a batch sequentially in chunks.
 
 
 ### Function Annotations
 There is a default interpreter that will simply apply the rules outlined above but if additional information about a function is available, e.g., that it applies elementwise like `jnp.tanh`, we can do better.
-These additional annotations are available in `wrapped_functions.py`'s `_LAPLACE_FN_REGISTRY`. 
+These additional annotations are available in `wrapped_functions.py`'s `_LAPLACE_FN_REGISTRY`.
 Specifically, to augment a function `fn` to accept `FwdLaplArray` instead of regular `jax.Array`, we wrap it with `wrap_forward_laplacian` from `fwd_laplacian.py`:
 ```python
 wrap_forward_laplacian(jnp.tanh, in_axes=())
@@ -142,10 +142,11 @@ g(jnp.ones(())).laplacian # 10
 Sparsity is detected at compile time, this has the advantage of avoiding expensive index computations at runtime and enables efficient reductions. However, it completely prohibits dynamic indexing, i.e., if indices are data-dependent we will simply default to full jacobians.
 
 As we know a lot about the sparsity structure apriori, e.g., that we are only sparse in one dimension, we use a custom sparsity operations that are more efficient than relying on JAX's default `BCOO` (further, at the time of writing, the support for `jax.experimental.sparse` is quite bad).
-So, the sparsity data format is implemented in `FwdJacobian` in `api.py`. Instead of storing a dense array `(m, n)` for a function `f:R^n -> R^m`, we store only the non-zero data in a `(m,d)` array where `d<n` is the maximum number of non-zero inputs any output depends on. 
+So, the sparsity data format is implemented in `FwdJacobian` in `api.py`. Instead of storing a dense array `(m, n)` for a function `f:R^n -> R^m`, we store only the non-zero data in a `(m,d)` array where `d<n` is the maximum number of non-zero inputs any output depends on.
 To be able to recreate the larger `(m,n)` array from the `(m,d)` array, we additional keep track of the indices in the last dimension in a mask `(m,d)` dimensional array of integers `0<mask_ij<n`.
 
 Masks are treated as compile time static and will be traced automatically. If the tracing is not possible, e.g., due to data dependent indexing, we will fall back to a dense implementation. These propagation rules are implemented in `jvp.py`.
+
 
 ### Memory efficiency
 The forward laplacian uses more GPU memory due to the full materialization of the Jacobian matrix.
@@ -158,17 +159,6 @@ def f(x):
     return x**2
 
 batched_f = batched_vmap(f, max_batch_size=64)
-```
-
-##### Omnistaging
-If arrays do not depend on the initial input, they are typically still traced to better optimize the final program. This is called [omnistaging](https://github.com/google/jax/pull/3370). While this generally is beneficial, it does not allow us to perform indexing as tracer hide the actual data. 
-So, if we use sparsity we want to compute all arrays that do not explicitly depend on the input such that we could use them for index operations.
-While this is not documented, it can be accomplished by overwriting the global trace via:
-```python
-from jax import core
-
-with core.new_main(core.EvalTrace, dynamic=True):
-    ...
 ```
 
 ## Citation
@@ -208,8 +198,8 @@ contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additio
 
 ## Trademarks
 
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft 
-trademarks or logos is subject to and must follow 
+This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft
+trademarks or logos is subject to and must follow
 [Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
 Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
 Any use of third-party trademarks or logos are subject to those third-party's policies.

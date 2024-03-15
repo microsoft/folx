@@ -3,7 +3,6 @@ import logging
 from typing import TypeVar
 
 import jax
-import jax.core as core
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
@@ -192,7 +191,7 @@ def sparse_index_jvp(
         # An index operation is expected to be static. If it is not, we will default to
         # materializing everything.
         # https://github.com/google/jax/pull/3370
-        with core.new_main(core.EvalTrace, dynamic=True):
+        with jax.ensure_compile_time_eval():
             extra_filled = jtu.tree_map(
                 lambda x: jnp.full(x.shape, -1, dtype=jnp.int32), extra_args
             )
@@ -287,7 +286,7 @@ def sparse_scatter_jvp(
 
     updates: FwdLaplArray = updates
     n = updates.jacobian.max_n + 1
-    with core.new_main(core.EvalTrace, dynamic=True):
+    with jax.ensure_compile_time_eval():
         one_hot_mask = jax.nn.one_hot(
             updates.jacobian.x0_idx, n, axis=-1, dtype=jnp.int32
         ).sum(0)
