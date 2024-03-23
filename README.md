@@ -48,19 +48,27 @@ class MLP(nn.Module):
             x = nn.Dense(100)(x)
             x = nn.silu(x)
         return nn.Dense(1)(x).sum()
- 
+
 mlp = MLP()
 x = jnp.ones((20, 100, 4))
 params = mlp.init(jax.random.PRNGKey(0), x)
 def fwd(x):
     return mlp.apply(params, x)
 
-fwd_lapl = jax.jit(jax.vmap(folx.forward_laplacian(fwd, sparsity_threshold=4)))
-%time jax.block_until_ready(fwd_lapl(x)) # Wall time: 5.05 s
-%timeit jax.block_until_ready(fwd_lapl(x)) # 2.59 ms ± 15.3 µs per loop (mean ± std. dev. of 7 runs, 100 loops each)
-fwd_lapl = jax.jit(jax.vmap(folx.forward_laplacian(fwd, sparsity_threshold=0)))
-%time jax.block_until_ready(fwd_lapl(x)) # Wall time: 2.66 s
-%timeit jax.block_until_ready(fwd_lapl(x)) # 48.7 ms ± 42.1 µs per loop (mean ± std. dev. of 7 runs, 10 loops each)
+# Traditional loop implementation
+lapl = jax.jit(jax.vmap(folx.LoopLaplacianOperator()(fwd)))
+%time jax.block_until_ready(lapl(x)) # Wall time: 1.42 s
+%timeit jax.block_until_ready(lapl(x)) # 224 ms ± 54 µs per loop (mean ± std. dev. of 7 runs, 1 loop each)
+
+# Forward laplacian without sparsity
+lapl = jax.jit(jax.vmap(folx.ForwardLaplacianOperator(0)(fwd)))
+%time jax.block_until_ready(lapl(x)) # Wall time: 2.66 s
+%timeit jax.block_until_ready(lapl(x)) # 48.7 ms ± 42.1 µs per loop (mean ± std. dev. of 7 runs, 10 loops each)
+
+# Forward laplacian with sparsity
+lapl = jax.jit(jax.vmap(folx.ForwardLaplacianOperator(4)(fwd)))
+%time jax.block_until_ready(lapl(x)) # Wall time: 5.05 s
+%timeit jax.block_until_ready(lapl(x)) # 2.59 ms ± 15.3 µs per loop (mean ± std. dev. of 7 runs, 100 loops each)
 ```
 For electronic wave function like FermiNet or PsiFormer, `sparsity_threshold=6` is a recommended value. But, tuning this hyperparameter may accelerate computations.
 

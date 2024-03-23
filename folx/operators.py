@@ -18,13 +18,11 @@ __all__ = [
 
 
 class Laplacian(Protocol):
-    def __call__(self, x: Array) -> tuple[Array, Array]:
-        ...
+    def __call__(self, x: Array) -> tuple[Array, Array]: ...
 
 
 class LaplacianOperator(Protocol):
-    def __call__(self, f: Callable[[Array], Array]) -> Laplacian:
-        ...
+    def __call__(self, f: Callable[[Array], Array]) -> Laplacian: ...
 
 
 @dataclass(frozen=True)
@@ -46,10 +44,15 @@ class LoopLaplacianOperator(LaplacianOperator):
     def __call__(f):
         @jax.jit
         def laplacian(x: jax.Array):
+            x_shape = x.shape
             x = x.reshape(-1)
             n = x.shape[0]
             eye = jnp.eye(n)
-            grad_f = jax.grad(f)
+
+            def f_(x):
+                return f(x.reshape(x_shape))
+
+            grad_f = jax.grad(f_)
             jacobian, dgrad_f = jax.linearize(grad_f, x)
 
             _, laplacian = jax.lax.scan(
