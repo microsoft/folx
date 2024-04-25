@@ -47,7 +47,7 @@ class LoopLaplacianOperator(LaplacianOperator):
             x_shape = x.shape
             x = x.reshape(-1)
             n = x.shape[0]
-            eye = jnp.eye(n)
+            eye = jnp.eye(n, dtype=x.dtype)
 
             def f_(x):
                 return f(x.reshape(x_shape))
@@ -70,7 +70,7 @@ class ParallelLaplacianOperator(LaplacianOperator):
         def laplacian(x: jax.Array):
             x = x.reshape(-1)
             n = x.shape[0]
-            eye = jnp.eye(n)
+            eye = jnp.eye(n, dtype=x.dtype)
             grad_f = jax.grad(f)
             jacobian, dgrad_f = jax.linearize(grad_f, x)
 
