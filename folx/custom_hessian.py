@@ -1,7 +1,7 @@
-import jax
 import jax.numpy as jnp
 
 from folx.ad import is_tree_complex
+from folx.vmap import batched_vmap
 
 from .api import Array, ExtraArgs, FwdLaplArgs, MergeFn, JAC_DIM
 from .utils import trace_of_product
@@ -30,16 +30,6 @@ def slogdet_jac_hessian_jac(
     x0_dim = J.shape[-1]
 
     def elementwise(A_inv, J):
-        # Naive implementation
-        # @functools.partial(jax.vmap, in_axes=(-1, None), out_axes=-1)
-        # @functools.partial(jax.vmap, in_axes=(None, -1), out_axes=-1)
-        # def inner(v1, v2):
-        #     A_inv_v = A_inv@v1
-        #     v_A_inv = v2.T@A_inv.T
-        #     return -v_A_inv.reshape(-1)@A_inv_v.reshape(-1)
-        # vHv = inner(J, J)
-        # trace = jnp.trace(vHv)
-
         # We can do better and compute the trace more efficiently.
         A_inv_J = jnp.einsum('ij,jdk->idk', A_inv, J)
         trace = -trace_of_product(
@@ -53,11 +43,7 @@ def slogdet_jac_hessian_jac(
 
     # We can either use vmap or scan. Scan is slightly slower but uses less memory.
     # Here we assume that we will in general encounter larger determinants rather than many.
-    # signs, flat_out = jax.vmap(elementwise)(A_inv, J)
-    def scan_wrapper(_, x):
-        return None, elementwise(*x)
-
-    signs, flat_out = jax.lax.scan(scan_wrapper, None, (A_inv, J))[1]
+    signs, flat_out = batched_vmap(elementwise, 1)(A_inv, J)
     sign_out, log_abs_out = signs.reshape(leading_dims), flat_out.reshape(leading_dims)
 
     if is_tree_complex(A):
