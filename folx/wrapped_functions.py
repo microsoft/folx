@@ -153,7 +153,7 @@ def slogdet_jvp(primals, tangents):
             sign_jvp = jac_dot_tangent
             log_det_jvp = jac_dot_tangent.real
         else:
-            sign_jvp = jnp.zeros(())
+            sign_jvp = jnp.zeros((), dtype=jac_dot_tangent.dtype)
             log_det_jvp = jac_dot_tangent
         return (sign_jvp, log_det_jvp)
 
@@ -383,15 +383,13 @@ def is_registered(primitive_or_name: Primitive | str) -> bool:
 @overload
 def get_laplacian(
     primitive_or_name: Primitive, wrap_if_missing: Literal[True]
-) -> ForwardLaplacian:
-    ...
+) -> ForwardLaplacian: ...
 
 
 @overload
 def get_laplacian(
     primitive_or_name: Primitive | str, wrap_if_missing: Literal[False] = False
-) -> ForwardLaplacian | None:
-    ...
+) -> ForwardLaplacian | None: ...
 
 
 def get_laplacian(

@@ -99,13 +99,13 @@ class TestForwardLaplacian(LaplacianTestCase):
     @parameterized.expand([(False,), (True,)])
     def test_slogdet(self, test_complex: bool):
         x = np.random.normal(size=(16 * 16))
-        w = np.random.normal(size=(16, 16))
+        w = np.random.normal(size=(16 * 16, 16 * 16))
         if test_complex:
-            w = w + 1j * np.random.normal(size=(16, 16))
+            w = w + 1j * np.random.normal(size=w.shape)
 
         @jax.jit
         def f(x):
-            return jnp.linalg.slogdet(jnp.tanh(x.reshape(16, 16) @ w))
+            return jnp.linalg.slogdet(jnp.tanh((x @ w).reshape(16, 16)))
 
         for sparsity in [0, x.size]:
             with self.subTest(sparsity=sparsity):

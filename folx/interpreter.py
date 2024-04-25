@@ -171,35 +171,45 @@ def eval_jaxpr_with_forward_laplacian(
     for eqn in jaxpr.eqns:
         invals = env.read_many(eqn.invars)
         # Eval expression
-        if all(not isinstance(x, FwdLaplArray) for x in invals):
-            subfuns, bind_params = eqn.primitive.get_bind_params(eqn.params)
-            # If non of the inputs were dependent on an FwdLaplArray,
-            # we can just use the regular primitive. This will avoid
-            # omnistaging. While this could cost us some memory and speed,
-            # it gives us access to more variables during tracing.
-            # https://github.com/google/jax/pull/3370
-            if all(not isinstance(x, core.Tracer) for x in invals) and enable_sparsity:
-                try:
-                    with jax.ensure_compile_time_eval():
+        try:
+            if all(not isinstance(x, FwdLaplArray) for x in invals):
+                subfuns, bind_params = eqn.primitive.get_bind_params(eqn.params)
+                # If non of the inputs were dependent on an FwdLaplArray,
+                # we can just use the regular primitive. This will avoid
+                # omnistaging. While this could cost us some memory and speed,
+                # it gives us access to more variables during tracing.
+                # https://github.com/google/jax/pull/3370
+                if (
+                    all(not isinstance(x, core.Tracer) for x in invals)
+                    and enable_sparsity
+                ):
+                    try:
+                        with jax.ensure_compile_time_eval():
+                            outvals = eqn.primitive.bind(
+                                *subfuns, *invals, **bind_params
+                            )
+                    except Exception as e:
+                        with LoggingPrefix(f'({summarize(eqn.source_info)})'):
+                            logging.warning(
+                                f'Could not perform operation {eqn.primitive.name} in eager execution despite it only depending on non-input dependent values. '
+                                'We switch to tracing rather than eager execution. This may impact sparsity propagation.\n'
+                                f'{e}'
+                            )
                         outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
-                except Exception as e:
-                    with LoggingPrefix(f'({summarize(eqn.source_info)})'):
-                        logging.warning(
-                            f'Could not perform operation {eqn.primitive.name} in eager execution despite it only depending on non-input dependent values. '
-                            'We switch to tracing rather than eager execution. This may impact sparsity propagation.\n'
-                            f'{e}'
-                        )
+                else:
                     outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
+            elif eqn.primitive.name == 'scan':
+                outvals = eval_scan(eqn, invals)
+            elif eqn.primitive.name == 'pjit':
+                outvals = eval_pjit(eqn, invals)
+            elif eqn.primitive.name == 'custom_jvp_call':
+                outvals = eval_custom_jvp(eqn, invals)
             else:
-                outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
-        elif eqn.primitive.name == 'scan':
-            outvals = eval_scan(eqn, invals)
-        elif eqn.primitive.name == 'pjit':
-            outvals = eval_pjit(eqn, invals)
-        elif eqn.primitive.name == 'custom_jvp_call':
-            outvals = eval_custom_jvp(eqn, invals)
-        else:
-            outvals = eval_laplacian(eqn, invals)
+                outvals = eval_laplacian(eqn, invals)
+        except Exception as e:
+            with LoggingPrefix(f'({summarize(eqn.source_info)})'):
+                logging.error(f'Error in operation {eqn.primitive.name}.')
+            raise e
 
         # unify output
         if not eqn.primitive.multiple_results:

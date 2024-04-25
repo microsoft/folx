@@ -485,6 +485,7 @@ def get_jvp_function(
             (not args.any_jacobian_weak)
             or (FunctionFlags.INDEXING in flags)
             or (in_axes == ())
+            or (len(args) == 1)
         ):
             return parallel_jvp(args, kwargs)
         else:
