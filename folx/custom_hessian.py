@@ -46,7 +46,7 @@ def slogdet_jac_hessian_jac(
             jnp.transpose(A_inv_J, (1, 0, 2)).reshape(-1, x0_dim),
             A_inv_J.reshape(-1, x0_dim),
         )
-        return jnp.zeros(()), trace
+        return jnp.zeros((), dtype=trace.dtype), trace
 
     A_inv = A_inv.reshape(-1, *A.shape[-2:])
     J = J.reshape(-1, *J.shape[-3:])
