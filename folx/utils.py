@@ -415,13 +415,7 @@ def compact_repeated_dims_except(arr: np.ndarray, axis):
     axis = bound_axis(arr, axis)
     dims = np.setdiff1d(np.arange(arr.ndim), axis)
     for d in dims:
-        first_item = np.take(
-            arr,
-            [
-                0,
-            ],
-            axis=d,
-        )
+        first_item = np.take(arr, [0], axis=d)
         if (first_item == arr).all():
             arr = first_item
             compact_axes_list.append(d)

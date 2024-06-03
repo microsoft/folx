@@ -150,7 +150,9 @@ class FwdJacobian(NamedTuple):
         if idx is None:
             return self.dense_array
         if len(idx) == 0:
-            return jnp.zeros((*self.data_shape, 0), dtype=self.data.dtype)
+            return jnp.expand_dims(
+                jnp.zeros(self.data_shape, dtype=self.data.dtype), JAC_DIM
+            )
         if self.x0_idx is None:
             return self.data[idx]
         return self.materialize_for_idx(self.get_index_mask(idx), len(idx))

@@ -27,6 +27,7 @@ from .api import (
 from .utils import (
     add_vmap_jacobian_dim,
     array_wise_flat_wrap,
+    compact_repeated_dims_except,
     flat_wrap,
     get_reduced_jacobians,
     jac_jacT,
@@ -137,12 +138,8 @@ def dot_product_jac_hessian_jac(
     # [I, 0]
     # where I is the identity matrix of the same shape as the input.
     assert len(args) == 2, 'Dot product only supports two args.'
-    flat_out = (
-        2
-        * trace_jac_jacT(args.arrays[0].jacobian, args.arrays[1].jacobian, shared_idx)[
-            None
-        ]
-    )
+    lhs, rhs = args.jacobian
+    flat_out = 2 * trace_jac_jacT(lhs, rhs, shared_idx)[None]
     unravel = jfu.ravel_pytree(fn(*args.x))[1]
     return unravel(flat_out)
 
@@ -310,6 +307,7 @@ def vmapped_jac_hessian_jac(
 
     if dense_out and FunctionFlags.SPARSE_JHJ not in flags:
         lapl_args = lapl_args.dense
+        out_idx = None
     if out_idx is not None and out_idx.shape[JAC_DIM] == 0:
         return jnp.zeros(())
 
@@ -347,9 +345,18 @@ def vmapped_jac_hessian_jac(
         return result
 
     # TODO: this implementation also assumes that we only reduce the last dimension.
-    out_idx_ax = 1 if out_idx is not None else None
-    for axes in vmap_seq[::-1]:
-        hess_transform = jax.vmap(hess_transform, in_axes=(*axes, out_idx_ax))
+    if out_idx is not None:
+        # By compressing out_idx we can reduce the number of non-coalesced memory accesses.
+        out_idx, compressed_axes = compact_repeated_dims_except(out_idx, JAC_DIM)
+        out_idx_seq: list[int | None] = [1] * len(vmap_seq)
+        for c in compressed_axes[::-1]:
+            out_idx_seq[c - 1] = None
+            out_idx = jnp.take(out_idx, 0, axis=c)
+    else:
+        out_idx_seq = [None] * len(vmap_seq)
+
+    for axes, oia in zip(vmap_seq[::-1], out_idx_seq[::-1]):
+        hess_transform = jax.vmap(hess_transform, in_axes=(*axes, oia))
     # flatten to 1D and then unravel to the original structure
     result = hess_transform(lapl_args, extra_args, out_idx)
     if mask is not None:
