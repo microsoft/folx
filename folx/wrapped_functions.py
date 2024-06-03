@@ -19,7 +19,11 @@ from .api import (
     FwdLaplArray,
     PyTree,
 )
-from .custom_hessian import complex_abs_jac_hessian_jac, slogdet_jac_hessian_jac
+from .custom_hessian import (
+    complex_abs_jac_hessian_jac,
+    div_jac_hessian_jac,
+    slogdet_jac_hessian_jac,
+)
 from .wrapper import (
     warp_without_fwd_laplacian,
     wrap_elementwise,
@@ -303,7 +307,10 @@ _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
         jax.lax.mul, flags=FunctionFlags.MULTIPLICATION, in_axes=()
     ),
     jax.lax.div_p: wrap_forward_laplacian(
-        jax.lax.div, flags=FunctionFlags.LINEAR_IN_FIRST, in_axes=()
+        jax.lax.div,
+        flags=FunctionFlags.LINEAR_IN_FIRST,
+        in_axes=(),
+        custom_jac_hessian_jac=div_jac_hessian_jac,
     ),
     jax.lax.pow_p: wrap_forward_laplacian(jax.lax.pow, in_axes=()),
     jax.lax.integer_pow_p: wrap_forward_laplacian(jax.lax.integer_pow, in_axes=()),

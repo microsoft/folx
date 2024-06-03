@@ -1,10 +1,11 @@
+import jax
 import jax.numpy as jnp
 
 from folx.ad import is_tree_complex
 from folx.vmap import batched_vmap
 
 from .api import Array, ExtraArgs, FwdLaplArgs, MergeFn, JAC_DIM
-from .utils import trace_of_product
+from .utils import get_reduced_jacobians, trace_jac_jacT, trace_of_product
 
 
 def slogdet_jac_hessian_jac(
@@ -75,3 +76,30 @@ def complex_abs_jac_hessian_jac(
     x_J = x.real * J.real + x.imag * J.imag
 
     return jnp.vdot(J_abs, J_abs) / y - jnp.vdot(x_J, x_J) / y**3
+
+
+def div_jac_hessian_jac(
+    args: FwdLaplArgs,
+    extra_args: ExtraArgs,
+    merge: MergeFn,
+    materialize_idx: Array | None,
+):
+    total_args = merge(args.x, extra_args)  # type: ignore
+    assert len(total_args) == 2, 'Div requires two arguments'
+    x, y = total_args
+    assert x.shape == y.shape == (), 'Div requires two scalars'
+
+    if len(args.x) == 2:
+        lhs_grad, rhs_grad = get_reduced_jacobians(*args.jacobian, idx=materialize_idx)
+        JJ_rr = rhs_grad.T @ rhs_grad
+        JJ_lr = lhs_grad.T @ rhs_grad
+
+        ry2 = jax.lax.integer_pow(y, -2)
+        H_lr = -2 * ry2
+        H_rr = 2 * x * (ry2 / y)
+        return H_lr * JJ_lr + H_rr * JJ_rr
+    elif len(args.x) == 1:
+        # We know that it must be the denominator since the Hessian would be 0 otherwise.
+        J_den = args.jacobian[0]
+        H = 2 * x * jax.lax.integer_pow(y, -3)
+        return trace_jac_jacT(J_den, J_den, materialize_idx) * H

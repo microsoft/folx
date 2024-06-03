@@ -105,7 +105,9 @@ def general_jac_hessian_jac(
     return unravel(flat_out)
 
 
-def off_diag_jac_hessian_jac(fn: ForwardFn, args: FwdLaplArgs, out_idx: Array | None):
+def off_diagblock_jac_hessian_jac(
+    fn: ForwardFn, args: FwdLaplArgs, out_idx: Array | None
+):
     # if we know that a function is linear in one arguments, it's hessian must be off diagonal
     # thus we can safe some computation by only computing the off diagonal part of the hessian.
     assert len(args) == 2, 'Off diag hessian only supports 2 args at the moment.'
@@ -116,9 +118,9 @@ def off_diag_jac_hessian_jac(fn: ForwardFn, args: FwdLaplArgs, out_idx: Array | 
     flat_fn = array_wise_flat_wrap(fn, *args.x)
 
     def jac_lhs(lhs, rhs):
-        return jax.jacobian(flat_fn, argnums=0)(lhs, rhs)
+        return jax.jacrev(flat_fn, argnums=0)(lhs, rhs)
 
-    hessian = jax.jacobian(jac_lhs, argnums=1)(
+    hessian = jax.jacfwd(jac_lhs, argnums=1)(
         flat_arr(args.arrays[0]), flat_arr(args.arrays[1])
     )
 
@@ -305,9 +307,12 @@ def vmapped_jac_hessian_jac(
 
     out_idx, dense_out = find_out_idx(lapl_args, in_axes, flags, sparsity_threshold)
 
+    # If the output is dense, we can densify the input
     if dense_out and FunctionFlags.SPARSE_JHJ not in flags:
         lapl_args = lapl_args.dense
         out_idx = None
+
+    # If the output is empty, we can return zeros
     if out_idx is not None and out_idx.shape[JAC_DIM] == 0:
         return jnp.zeros(())
 
@@ -339,7 +344,7 @@ def vmapped_jac_hessian_jac(
         elif FunctionFlags.MULTIPLICATION in flags:
             result = dot_product_jac_hessian_jac(merged_fn, args, out_idx)
         elif FunctionFlags.LINEAR_IN_ONE in flags:
-            result = off_diag_jac_hessian_jac(merged_fn, args, out_idx)
+            result = off_diagblock_jac_hessian_jac(merged_fn, args, out_idx)
         else:
             result = general_jac_hessian_jac(merged_fn, args, out_idx)
         return result
@@ -355,8 +360,10 @@ def vmapped_jac_hessian_jac(
     else:
         out_idx_seq = [None] * len(vmap_seq)
 
+    # vectorize the Tr(JHJ^T)
     for axes, oia in zip(vmap_seq[::-1], out_idx_seq[::-1]):
         hess_transform = jax.vmap(hess_transform, in_axes=(*axes, oia))
+
     # flatten to 1D and then unravel to the original structure
     result = hess_transform(lapl_args, extra_args, out_idx)
     if mask is not None:

@@ -18,12 +18,7 @@ from laplacian_testcase import LaplacianTestCase
 
 
 class TestForwardLaplacian(LaplacianTestCase):
-    @parameterized.expand(
-        [
-            (False,),
-            (True,),
-        ]
-    )
+    @parameterized.expand([(False,), (True,)])
     def test_elementwise(self, test_complex: bool):
         functions = [
             jnp.sin,
@@ -48,14 +43,58 @@ class TestForwardLaplacian(LaplacianTestCase):
                     self.assert_allclose(y.jacobian.dense_array, self.jacobian(f, x).T)
                     self.assert_allclose(y.laplacian, self.laplacian(f, x))
 
-    @parameterized.expand(
-        [
-            (False, False),
-            (False, True),
-            (True, False),
-            (True, True),
-        ]
-    )
+    @parameterized.expand([(False,), (True,)])
+    def test_binary(self, test_complex: bool):
+        functions = [jnp.add, jnp.subtract, jnp.multiply, jnp.divide]
+        x1 = np.random.randn(10)
+        x2 = np.random.randn(10)
+        if test_complex:
+            x1 = x1 + 1j * np.random.randn(10)
+            x2 = x2 + 1j * np.random.randn(10)
+        for f in functions:
+            x = jnp.stack([x1, x2])
+
+            def wrapped_f(x):
+                return f(x[0], x[1])
+
+            def f_left(x):
+                return f(x, x2)
+
+            def f_right(x):
+                return f(x2, x)
+
+            for sparsity in [0, x1.size]:
+                # test both arguments
+                with self.subTest(sparsity=sparsity, f=f, binary=True):
+                    y = forward_laplacian(wrapped_f, sparsity)(x)
+                    self.assertEqual(y.x.shape, x1.shape, msg=f'{f}')
+                    self.assert_allclose(y.x, wrapped_f(x))
+                    self.assert_allclose(
+                        y.jacobian.dense_array, self.jacobian(wrapped_f, x).T
+                    )
+                    self.assert_allclose(y.laplacian, self.laplacian(wrapped_f, x))
+
+                # test left hand argument
+                with self.subTest(sparsity=sparsity, f=f, binary=False):
+                    y = forward_laplacian(f_left, sparsity)(x1)
+                    self.assertEqual(y.x.shape, x1.shape, msg=f'{f}')
+                    self.assert_allclose(y.x, f_left(x1))
+                    self.assert_allclose(
+                        y.jacobian.dense_array, self.jacobian(f_left, x1).T
+                    )
+                    self.assert_allclose(y.laplacian, self.laplacian(f_left, x1))
+
+                # test right hand argument
+                with self.subTest(sparsity=sparsity, f=f, binary=False):
+                    y = forward_laplacian(f_right, sparsity)(x1)
+                    self.assertEqual(y.x.shape, x1.shape, msg=f'{f}')
+                    self.assert_allclose(y.x, f_right(x1))
+                    self.assert_allclose(
+                        y.jacobian.dense_array, self.jacobian(f_right, x1).T
+                    )
+                    self.assert_allclose(y.laplacian, self.laplacian(f_right, x1))
+
+    @parameterized.expand([(False, False), (False, True), (True, False), (True, True)])
     def test_matmul(self, left_complex: bool, right_complex: bool):
         x = np.random.normal(size=(16,))
         w = np.random.normal(size=(16, 16))
