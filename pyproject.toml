@@ -1,15 +1,15 @@
 [tool.poetry]
 name = 'folx'
-version = '0.2.7'
+version = '0.2.8'
 description = 'Forward Laplacian for JAX'
 authors = [
     "Nicholas Gao <n.gao@tum.de>",
     "Jonas Koehler <jonas.koehler@microsoft.com>",
-    "Adam Foster <adam.e.foster@microsoft.com>"
+    "Adam Foster <adam.e.foster@microsoft.com>",
 ]
 maintainers = [
     "Nicholas Gao <n.gao@tum.de>",
-    "Jonas Koehler <jonas.koehler@microsoft.com>"
+    "Jonas Koehler <jonas.koehler@microsoft.com>",
 ]
 license = 'MIT'
 readme = 'README.md'
@@ -27,7 +27,7 @@ classifiers = [
     'Topic :: Scientific/Engineering :: Chemistry',
     'Topic :: Scientific/Engineering :: Physics',
     'Programming Language :: Python :: 3.10',
-    'Programming Language :: Python :: 3.11'
+    'Programming Language :: Python :: 3.11',
 ]
 
 [tool.poetry.dependencies]
@@ -49,5 +49,5 @@ ignore = [
 ]
 
 [tool.ruff.format]
-quote-style="single"
+quote-style = "single"
 line-ending = "lf"
