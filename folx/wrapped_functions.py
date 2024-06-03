@@ -5,6 +5,7 @@ from typing import Any, Literal, ParamSpec, TypeVar, overload
 import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
+import numpy as np
 from jax.core import Primitive
 
 from folx.ad import is_tree_complex
@@ -20,9 +21,9 @@ from .api import (
 )
 from .custom_hessian import complex_abs_jac_hessian_jac, slogdet_jac_hessian_jac
 from .wrapper import (
+    warp_without_fwd_laplacian,
     wrap_elementwise,
     wrap_forward_laplacian,
-    warp_without_fwd_laplacian,
 )
 
 R = TypeVar('R', bound=PyTree[Array])
@@ -73,6 +74,13 @@ def dot_general(
     lh_brdcast_dims = tuple(i for i in lh_dims if i not in lh_batch_dims + lh_contract)
     rh_brdcast_dims = tuple(i for i in rh_dims if i not in rh_batch_dims + rh_contract)
 
+    all_weak = (
+        isinstance(lhs, FwdLaplArray)
+        and isinstance(rhs, FwdLaplArray)
+        and lhs.jacobian.weak
+        and rhs.jacobian.weak
+    )
+
     left_inp = rearrange(
         (lhs,),
         dict(
@@ -95,6 +103,53 @@ def dot_general(
         sparsity_threshold=sparsity_threshold,
     )
 
+    # ====================================================================================
+    # Fast path for sparse solutions with reasonably small intermediate size
+    # ====================================================================================
+    # If the intermediate size is the same as the largest input size, we can also
+    # accelerate things by decomposing the dot product into a sum and a multiplication.
+    # This costs more memory but should generally be faster thanks to sparser operations.
+    inter_size = np.prod(jnp.broadcast_shapes(left_inp.shape, right_inp.shape))
+    in_size = max(left_inp.size, right_inp.size)
+
+    def fwd_lapl_mul_sum(
+        lhs: FwdLaplArray, rhs: FwdLaplArray, dims: tuple[int, ...] | int
+    ):
+        # Fwd Laplacian for multiply and sum
+        # lazy import to avoid circular imports
+        from .interpreter import forward_laplacian
+
+        return forward_laplacian(
+            lambda x, y: (x * y).sum(dims),
+            disable_jit=True,
+            sparsity_threshold=sparsity_threshold,
+        )(lhs, rhs)
+
+    if inter_size == in_size and all_weak:
+        neg_lh_batch_dims = tuple(np.array(lh_batch_dims) - lhs.ndim)
+        neg_rh_batch_dims = tuple(np.array(rh_batch_dims) - rhs.ndim)
+        neg_lh_contract = tuple(np.array(lh_contract) - lhs.ndim)
+        neg_rh_contract = tuple(np.array(rh_contract) - rhs.ndim)
+        if (
+            neg_lh_contract == neg_rh_contract
+            and neg_lh_batch_dims == neg_rh_batch_dims
+            and lh_brdcast_dims == tuple(range(len(lh_brdcast_dims)))
+            and rh_brdcast_dims == tuple(range(len(rh_brdcast_dims)))
+            and lh_batch_dims == tuple(sorted(lh_batch_dims))
+            and rh_batch_dims == tuple(sorted(rh_batch_dims))
+        ):
+            # The checks above do the following:
+            # * check that batch dims are identical in both
+            # * check that contract dim are identical in both
+            # * check that all brdcast dims are at the beginning
+            # * check that no transpositions are needed
+            # Special case where we can skip the transpositions
+            return fwd_lapl_mul_sum(lhs, rhs, lh_contract)  # type: ignore
+        return fwd_lapl_mul_sum(left_inp, right_inp, -1)
+
+    # ====================================================================================
+    # General solution
+    # ====================================================================================
     # this einsum is somewhat inefficient.
     # one should think about rewriting the hessian
     # computation and just use the regular dot product.
@@ -109,7 +164,11 @@ def dot_general(
         )
 
     result = wrap_forward_laplacian(
-        dot_last, flags=FunctionFlags.DOT_PRODUCT | FunctionFlags.JOIN_JVP, in_axes=-1
+        dot_last,
+        flags=FunctionFlags.DOT_PRODUCT
+        | FunctionFlags.JOIN_JVP
+        | FunctionFlags.SPARSE_JHJ,
+        in_axes=-1,
     )((left_inp, right_inp), {}, sparsity_threshold=sparsity_threshold)
     return result
 

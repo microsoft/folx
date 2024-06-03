@@ -9,6 +9,7 @@ import jax.tree_util as jtu
 import jaxlib.xla_extension
 import numpy as np
 
+from .ad import hessian, jacrev
 from .api import (
     JAC_DIM,
     Array,
@@ -33,7 +34,6 @@ from .utils import (
     trace_of_product,
     vmap_sequences_and_squeeze,
 )
-from .ad import hessian, jacrev
 
 
 def JHJ_via_hessian(flat_fn: Callable, flat_x: Array, grad_2d: Array):
@@ -104,9 +104,7 @@ def general_jac_hessian_jac(
     return unravel(flat_out)
 
 
-def off_diag_jac_hessian_jac(
-    fn: ForwardFn, args: FwdLaplArgs, materialize_idx: Array | None
-):
+def off_diag_jac_hessian_jac(fn: ForwardFn, args: FwdLaplArgs, out_idx: Array | None):
     # if we know that a function is linear in one arguments, it's hessian must be off diagonal
     # thus we can safe some computation by only computing the off diagonal part of the hessian.
     assert len(args) == 2, 'Off diag hessian only supports 2 args at the moment.'
@@ -125,7 +123,7 @@ def off_diag_jac_hessian_jac(
 
     flat_out = 2 * trace_of_product(
         hessian,
-        jac_jacT(args.arrays[0].jacobian, args.arrays[1].jacobian, materialize_idx),
+        jac_jacT(args.arrays[0].jacobian, args.arrays[1].jacobian, out_idx),
     )
     unravel = jfu.ravel_pytree(fn(*args.x))[1]
     return unravel(flat_out)
@@ -198,11 +196,9 @@ def merge_and_populate(
     return np.asarray(result, dtype=int)
 
 
-def find_materialization_idx(
-    lapl_args: FwdLaplArgs, in_axes, flags: FunctionFlags, threshold: int
-):
+def find_out_idx(lapl_args: FwdLaplArgs, in_axes, flags: FunctionFlags, threshold: int):
     if not lapl_args.any_jacobian_weak:
-        return None
+        return None, True
     # TODO: Rewrite this!! This is quity messy and inefficient.
     # it assumes that we're only interested in the last dimension.
     with jax.ensure_compile_time_eval():
@@ -252,22 +248,26 @@ def find_materialization_idx(
     idx = np.moveaxis(idx, -1, JAC_DIM)
 
     if idx.shape[JAC_DIM] >= max_size or idx.shape[JAC_DIM] > threshold:
-        idx = None
-    return idx
+        return idx, True
+    return idx, False
 
 
-def remove_zero_entries(lapl_args: FwdLaplArgs, materialize_idx: np.ndarray | None):
-    if materialize_idx is None:
-        return lapl_args, None, None
+def remove_zero_entries(
+    lapl_args: FwdLaplArgs,
+    out_idx: np.ndarray,
+    dense_out: bool,
+):
+    if dense_out:
+        return lapl_args, out_idx, None
 
-    mask = (materialize_idx != -1).any(0)
+    mask = (out_idx != -1).any(0)
     if mask.sum() > 0.5 * mask.size:
         # this is a heuristic to avoid having unnecessary indexing overhead for
         # insufficiently sparse masks.
-        return lapl_args, materialize_idx, None
+        return lapl_args, out_idx, None
 
     indices = np.where(mask)
-    new_mat_idx = materialize_idx[(slice(None), *indices)]
+    new_mat_idx = out_idx[(slice(None), *indices)]
     new_arrs = []
     for arg in lapl_args.arrays:
         brdcast_dims = np.where(np.array(arg.x.shape) == 1)[0]
@@ -306,19 +306,16 @@ def vmapped_jac_hessian_jac(
     out = merged_fn(*lapl_args.x)
     unravel = jfu.ravel_pytree(out)[1]
 
-    materialize_idx = find_materialization_idx(
-        lapl_args, in_axes, flags, sparsity_threshold
-    )
-    if materialize_idx is None:
+    out_idx, dense_out = find_out_idx(lapl_args, in_axes, flags, sparsity_threshold)
+
+    if dense_out and FunctionFlags.SPARSE_JHJ not in flags:
         lapl_args = lapl_args.dense
-    if materialize_idx is not None and materialize_idx.shape[JAC_DIM] == 0:
+    if out_idx is not None and out_idx.shape[JAC_DIM] == 0:
         return jnp.zeros(())
 
     # If we do a dot product (not a hadamard product) we can check for empty hessian entries
     if FunctionFlags.DOT_PRODUCT in flags and all(len(a) == 1 for a in in_axes):
-        lapl_args, materialize_idx, mask = remove_zero_entries(
-            lapl_args, materialize_idx
-        )
+        lapl_args, out_idx, mask = remove_zero_entries(lapl_args, out_idx, dense_out)
         in_axes = jtu.tree_map(lambda _: -1, in_axes)
     else:
         mask = None
@@ -330,37 +327,34 @@ def vmapped_jac_hessian_jac(
     )
 
     # Hessian computation
-    def hess_transform(args: FwdLaplArgs, extra_args: ExtraArgs, materialize_idx):
+    def hess_transform(args: FwdLaplArgs, extra_args: ExtraArgs, out_idx):
         def merged_fn(*x):
             return fwd(*merge(x, extra_args))
 
         merged_fn.__name__ = fwd.__name__
 
+        if FunctionFlags.SPARSE_JHJ not in flags:
+            out_idx = None if dense_out else out_idx
+
         if custom_jac_hessian_jac is not None:
-            result = custom_jac_hessian_jac(args, extra_args, merge, materialize_idx)
+            result = custom_jac_hessian_jac(args, extra_args, merge, out_idx)
         elif FunctionFlags.MULTIPLICATION in flags:
-            result = dot_product_jac_hessian_jac(merged_fn, args, materialize_idx)
+            result = dot_product_jac_hessian_jac(merged_fn, args, out_idx)
         elif FunctionFlags.LINEAR_IN_ONE in flags:
-            result = off_diag_jac_hessian_jac(merged_fn, args, materialize_idx)
+            result = off_diag_jac_hessian_jac(merged_fn, args, out_idx)
         else:
-            result = general_jac_hessian_jac(merged_fn, args, materialize_idx)
+            result = general_jac_hessian_jac(merged_fn, args, out_idx)
         return result
 
     # TODO: this implementation also assumes that we only reduce the last dimension.
+    out_idx_ax = 1 if out_idx is not None else None
     for axes in vmap_seq[::-1]:
-        hess_transform = jax.vmap(
-            hess_transform, in_axes=(*axes, (None if materialize_idx is None else 1))
-        )
+        hess_transform = jax.vmap(hess_transform, in_axes=(*axes, out_idx_ax))
     # flatten to 1D and then unravel to the original structure
-    if mask is None:
-        flat_out = jfu.ravel_pytree(
-            hess_transform(lapl_args, extra_args, materialize_idx)
-        )[0]
-    else:
-        flat_out = hess_transform(lapl_args, extra_args, materialize_idx)
-        result = jnp.zeros_like(out).at[mask].set(flat_out)  # type: ignore
-        flat_out = jfu.ravel_pytree(result)[0]
-    return unravel(flat_out)
+    result = hess_transform(lapl_args, extra_args, out_idx)
+    if mask is not None:
+        result = jnp.zeros_like(out).at[mask].set(result)  # type: ignore
+    return unravel(jfu.ravel_pytree(result)[0])
 
 
 def get_jacobian_hessian_jacobian_trace(

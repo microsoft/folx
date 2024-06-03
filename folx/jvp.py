@@ -258,6 +258,7 @@ def sparse_scatter_jvp(
     kwargs,
     sparsity_threshold: int,
 ) -> tuple[Array, FwdJacobian, Array]:
+    updates: FwdLaplArray
     operand, scatter_indices, updates = merge(laplace_args.arrays, extra_args)  # type: ignore
     if isinstance(scatter_indices, FwdLaplArray):
         return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
@@ -284,7 +285,6 @@ def sparse_scatter_jvp(
         )
         return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
 
-    updates: FwdLaplArray = updates
     n = updates.jacobian.max_n + 1
     with jax.ensure_compile_time_eval():
         one_hot_mask = jax.nn.one_hot(
