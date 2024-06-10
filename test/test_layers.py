@@ -190,7 +190,7 @@ class TestForwardLaplacian(LaplacianTestCase):
 
         @jax.jit
         def identity(x):
-            return x
+            return 1.0 * x
 
         def custom_jac_hessian_jac(args, extra_args, merge, materialize_idx):
             return jtu.tree_map(lambda x: jnp.full_like(x, 10), args.x)
