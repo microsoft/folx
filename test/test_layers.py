@@ -135,6 +135,25 @@ class TestForwardLaplacian(LaplacianTestCase):
                 self.assert_allclose(y.jacobian.dense_array, jac)
                 self.assert_allclose(y.laplacian, self.laplacian(f, (a, b)))
 
+        # Test some polynomial stuff
+        x = np.random.normal(size=(4,))
+        w1 = np.random.normal(size=(4, 8))
+        w2 = np.random.normal(size=(4, 4, 8))
+
+        @jax.jit
+        def f(x):
+            return jnp.dot(x, w1) + jnp.einsum('...i,...j,...ijk->...k', x, x, w2)
+
+        for sparsity in [0, a.size + b.size]:
+            with self.subTest(sparsity=sparsity):
+                y = jax.jit(forward_laplacian(f, sparsity))(x)
+                self.assertEqual(y.x.shape, f(x).shape)
+                self.assert_allclose(y.x, f(x))
+                jac = self.jacobian(f, x)
+                jac = jnp.concatenate(jtu.tree_leaves(jac), axis=0)
+                self.assert_allclose(y.jacobian.dense_array.T, jac)
+                self.assert_allclose(y.laplacian, self.laplacian(f, x))
+
     @parameterized.expand([(False,), (True,)])
     def test_slogdet(self, test_complex: bool):
         x = np.random.normal(size=(16 * 16))
