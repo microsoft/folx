@@ -412,8 +412,10 @@ def broadcast_dim(xs: Sequence[np.ndarray] | Sequence[Array], fill_value, axis):
 
 def compact_repeated_dims_except(arr: np.ndarray, axis):
     compact_axes_list = []
-    axis = bound_axis(arr, axis)
-    dims = np.setdiff1d(np.arange(arr.ndim), axis)
+    dims = np.arange(arr.ndim)
+    if axis is not None:
+        axis = bound_axis(arr, axis)
+        dims = np.setdiff1d(dims, axis)
     for d in dims:
         first_item = np.take(arr, [0], axis=d)
         if (first_item == arr).all():

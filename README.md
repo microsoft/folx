@@ -200,6 +200,8 @@ def f(x):
 batched_f = batched_vmap(f, max_batch_size=64)
 ```
 
+As an experimental tool, one can use `folx.experimental.auto_batched_vmap` which will automatically determine the optimal batch size based on the available memory. Though, this is highly experimental and may be a bad estimate.
+
 ## Citation
 If you find work helpful, please consider citing it as
 ```
