@@ -1,10 +1,9 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
+from laplacian_testcase import LaplacianTestCase
 
 from folx import forward_laplacian
-
-from laplacian_testcase import LaplacianTestCase
 
 
 class TestForwardLaplacianJvp(LaplacianTestCase):

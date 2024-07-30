@@ -1,11 +1,11 @@
 import unittest
+
 import jax
 import jax.numpy as jnp
 import numpy as np
-
-from folx.ad import jacfwd, jacrev, hessian
-
 from laplacian_testcase import LaplacianTestCase
+
+from folx.ad import hessian, jacfwd, jacrev
 
 
 class TestAutoDiff(LaplacianTestCase):

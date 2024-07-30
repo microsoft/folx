@@ -4,7 +4,6 @@ import numpy as np
 
 from folx import ForwardLaplacianOperator
 
-
 jax.config.update('jax_enable_x64', True)
 
 

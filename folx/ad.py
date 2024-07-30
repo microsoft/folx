@@ -1,6 +1,6 @@
 import jax
-import jax.numpy as jnp
 import jax.flatten_util as jfu
+import jax.numpy as jnp
 import jax.tree_util as jtu
 
 

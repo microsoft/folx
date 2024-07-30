@@ -5,7 +5,6 @@ import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 
-
 F = TypeVar('F', bound=Callable)
 
 

@@ -8,9 +8,9 @@ import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
 from jax import core
+from jax._src.source_info_util import summarize
 from jax.typing import ArrayLike
 from jax.util import safe_map
-from jax._src.source_info_util import summarize
 
 from .api import (
     IS_LEAF,

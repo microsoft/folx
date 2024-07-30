@@ -7,7 +7,6 @@ import jax.numpy as jnp
 from .api import Array
 from .interpreter import forward_laplacian
 
-
 __all__ = [
     'Laplacian',
     'LaplacianOperator',

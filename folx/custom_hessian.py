@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from folx.ad import is_tree_complex
 from folx.vmap import batched_vmap
 
-from .api import Array, ExtraArgs, FwdLaplArgs, MergeFn, JAC_DIM
+from .api import JAC_DIM, Array, ExtraArgs, FwdLaplArgs, MergeFn
 from .utils import get_reduced_jacobians, trace_jac_jacT, trace_of_product
 
 

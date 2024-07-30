@@ -9,9 +9,9 @@ import jax.tree_util as jtu
 import numpy as np
 
 from .api import (
+    IS_LEAF,
     JAC_DIM,
     Array,
-    IS_LEAF,
     ArrayOrFwdLaplArray,
     Arrays,
     Axes,
