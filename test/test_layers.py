@@ -4,20 +4,32 @@ import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
+from laplacian_testcase import LaplacianTestCase
 from parameterized import parameterized
 
 from folx import (
-    forward_laplacian,
-    wrap_forward_laplacian,
     deregister_function,
+    forward_laplacian,
     register_function,
+    wrap_forward_laplacian,
 )
 from folx.api import FwdLaplArray
 
-from laplacian_testcase import LaplacianTestCase
-
 
 class TestForwardLaplacian(LaplacianTestCase):
+    @parameterized.expand([(False,), (True,)])
+    def test_summation(self, test_complex: bool):
+        x = np.random.randn(10)
+        if test_complex:
+            x = x + 1j * np.random.randn(10)
+        for sparsity in [0, x.size]:
+            with self.subTest(sparsity=sparsity):
+                y = forward_laplacian(jnp.sum, sparsity)(x)
+                self.assertEqual(y.x.shape, ())
+                self.assert_allclose(y.x, jnp.sum(x))
+                self.assert_allclose(y.jacobian.dense_array, self.jacobian(jnp.sum, x))
+                self.assert_allclose(y.laplacian, 0)
+
     @parameterized.expand([(False,), (True,)])
     def test_elementwise(self, test_complex: bool):
         functions = [

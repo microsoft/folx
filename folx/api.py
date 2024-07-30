@@ -433,8 +433,8 @@ class FunctionFlags(IntFlag):
     REDUCTION = 1 << 3
     MULTIPLICATION = 1 << 4 | LINEAR_IN_ONE
     DOT_PRODUCT = 1 << 5 | REDUCTION | MULTIPLICATION
-
     INDEXING = 1 << 6 | LINEAR
     SCATTER = 1 << 7
     JOIN_JVP = 1 << 8
     SPARSE_JHJ = 1 << 9
+    SUMMATION = 1 << 10 | LINEAR | REDUCTION

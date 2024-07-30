@@ -320,7 +320,7 @@ _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
     jax.lax.sign_p: warp_without_fwd_laplacian(jax.lax.sign),
     jax.lax.reduce_sum_p: wrap_forward_laplacian(
         jax.lax.reduce_sum_p.bind,
-        flags=FunctionFlags.REDUCTION | FunctionFlags.LINEAR,
+        flags=FunctionFlags.SUMMATION,
         name='reduce_sum',
     ),
     jax.lax.reduce_max_p: wrap_forward_laplacian(

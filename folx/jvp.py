@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
 
+from .ad import vjp
 from .api import (
     JAC_DIM,
     Array,
@@ -22,16 +23,75 @@ from .api import (
 )
 from .tree_utils import tree_concat, tree_expand, tree_take
 from .utils import (
-    broadcast_except,
     broadcast_dim,
+    broadcast_except,
     broadcast_mask_to_jacobian,
     extend_jacobians,
     get_jacobian_for_reduction,
     np_concatenate_brdcast,
 )
-from .ad import vjp
 
 R = TypeVar('R', bound=PyTree[Array])
+
+
+def sparse_to_dense_sum_jvp(
+    laplace_args: FwdLaplArgs,
+    axes: Axes,
+    kwargs,
+    sparsity_threshold: int,
+):
+    x = laplace_args.x[0]
+    x_lapl = laplace_args.laplacian[0]
+    x_jac = laplace_args.jacobian[0]
+
+    if axes is None:
+        axes = kwargs.get('axes')
+    if axes is None:
+        axes = tuple(range(x.ndim))
+
+    # these are fairly easy to compute
+    y = x.sum(axes)
+    y_lapl = x_lapl.sum(axes)
+
+    # for the sparse jacobian, we will use a segment sum
+    out_shape = y.shape
+    out_size = np.prod(out_shape, dtype=int)
+    jac_axes = tuple(i + (i >= JAC_DIM) for i in axes) + (JAC_DIM,)
+    non_reduced_axes = tuple(i for i in range(x_jac.ndim) if i not in jac_axes)
+    assert x_jac.x0_idx is not None
+    axes_order = jac_axes + non_reduced_axes
+
+    def compute_outdeps(arr: np.ndarray, axis: int):
+        A_sorted = np.sort(arr, axis=axis)
+        max_out = (np.diff(A_sorted, axis=axis) > 0).sum().max() + 1
+        with jax.ensure_compile_time_eval():
+            idx_out = jnp.unique(A_sorted, axis=axis, size=max_out, fill_value=-1)
+        idx_out = np.asarray(idx_out)
+        return idx_out
+
+    # Create output mask
+    idx = np.transpose(x_jac.x0_idx, axes_order).reshape(-1, out_size)
+    idx_out = compute_outdeps(idx, axis=0)
+    if idx_out.shape[0] > sparsity_threshold:
+        logging.info(
+            f'Output ({idx_out.shape[0]}) reaches sparsity threshold ({sparsity_threshold}). Switching to dense.'
+        )
+        idx_out = None
+        out_dim = np.max(idx) + 1
+    else:
+        idx = np.argmax(idx[:, None] == idx_out, axis=1)
+        out_dim = idx_out.shape[0]
+        idx_out = idx_out.reshape(out_dim, *out_shape)
+
+    # segment sum on the jacobian
+    jac = jnp.transpose(x_jac.data, axes_order).reshape(-1, out_size)
+    out_jac = jax.vmap(
+        functools.partial(jax.ops.segment_sum, num_segments=out_dim),
+        in_axes=(1, 1),
+        out_axes=1,
+    )(jac, idx)
+    out_jac = out_jac.reshape(out_dim, *out_shape)
+    return y, FwdJacobian(out_jac, idx_out), y_lapl
 
 
 def sparse_jvp(
@@ -49,10 +109,7 @@ def sparse_jvp(
         return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
 
     if axes is None:
-        if 'axes' in kwargs:
-            axes = kwargs['axes']
-        elif 'axis' in kwargs:
-            axes = kwargs['axis']
+        axes = kwargs.get('axes')
     if axes is None:
         ndims = set(x.ndim for x in laplace_args.x)
         if len(ndims) != 1:
@@ -60,9 +117,12 @@ def sparse_jvp(
         axes = tuple(range(next(iter(ndims))))
     if isinstance(axes, int):
         axes = (axes,)
+
+    # Elementwise ops
     if axes == () or np.array(axes).size == 0:
         return sparse_diag_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
 
+    # Scatter ops
     if FunctionFlags.SCATTER in flags:
         return sparse_scatter_jvp(
             fwd,
@@ -75,7 +135,10 @@ def sparse_jvp(
             sparsity_threshold=sparsity_threshold,
         )
 
-    # TODO: One could also do the reduction after the jvp. In some cases that's more efficient.
+    # Summation
+    if FunctionFlags.SUMMATION in flags:
+        return sparse_to_dense_sum_jvp(laplace_args, axes, kwargs, sparsity_threshold)
+
     grad_tan, out_mask = get_jacobian_for_reduction(laplace_args.jacobian, axes)
     if out_mask.shape[JAC_DIM] > sparsity_threshold:
         logging.info(
