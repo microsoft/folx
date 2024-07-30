@@ -406,6 +406,16 @@ _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
         flags=FunctionFlags.LINEAR,
         name='scatter_add',
     ),
+    jax.lax.scatter_max_p: wrap_forward_laplacian(
+        jax.lax.scatter_max_p.bind,
+        flags=FunctionFlags.LINEAR,
+        name='scatter_max',
+    ),
+    jax.lax.scatter_min_p: wrap_forward_laplacian(
+        jax.lax.scatter_min_p.bind,
+        flags=FunctionFlags.LINEAR,
+        name='scatter_min',
+    ),
     jax.lax.stop_gradient_p: warp_without_fwd_laplacian(jax.lax.stop_gradient),
     jax.lax.eq_p: warp_without_fwd_laplacian(jax.lax.eq),
     jax.lax.lt_p: warp_without_fwd_laplacian(jax.lax.lt),
