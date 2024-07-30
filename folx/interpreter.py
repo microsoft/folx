@@ -109,7 +109,7 @@ def eval_jaxpr_with_forward_laplacian(
         first_carry, first_y = wrapped(in_carry, jtu.tree_map(lambda x: x[0], in_inp))
         # Check whether jacobian sparsity matches
         for a, b in zip(in_carry, first_carry):
-            if type(a) != type(b):
+            if not isinstance(a, type(b)):
                 raise TypeError(f'Type mismatch in scan: {type(a)} != {type(b)}')
             if isinstance(a, FwdLaplArray):
                 if not np.all(a.jacobian.x0_idx == b.jacobian.x0_idx):  # type: ignore
