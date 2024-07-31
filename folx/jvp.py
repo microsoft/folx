@@ -64,9 +64,13 @@ def sparse_to_dense_sum_jvp(
     def compute_outdeps(arr: np.ndarray, axis: int):
         A_sorted = np.sort(arr, axis=axis)
         max_out = (np.diff(A_sorted, axis=axis) > 0).sum().max() + 1
+        # move axis to back so we can use vectorize
+        A_sorted = np.moveaxis(A_sorted, axis, -1)
         with jax.ensure_compile_time_eval():
-            idx_out = jnp.unique(A_sorted, axis=axis, size=max_out, fill_value=-1)
-        idx_out = np.asarray(idx_out)
+            unique = functools.partial(jnp.unique, size=max_out, fill_value=-1)
+            unique = jnp.vectorize(unique, signature='(n)->(m)')
+            idx_out = unique(A_sorted)
+        idx_out = np.moveaxis(np.asarray(idx_out), -1, axis)
         return idx_out
 
     # Create output mask
