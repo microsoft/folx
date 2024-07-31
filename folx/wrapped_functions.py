@@ -50,7 +50,10 @@ def rearrange(
         *batch_dims, *brdcast_dims, *new_dims, *contract_dims
     )
     if len(contract_dims) > 0:
-        return x_rearranged.reshape(*x_rearranged.shape[: -len(contract_dims)], -1)
+        out_size = np.prod(x_rearranged.shape[-len(contract_dims) :], dtype=int)
+        return x_rearranged.reshape(
+            *x_rearranged.shape[: -len(contract_dims)], out_size
+        )
     # If there are no contract dims, we need to add a dummy dimensions
     return x_rearranged[..., None]
 
