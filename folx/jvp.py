@@ -90,6 +90,8 @@ def sparse_sum_jvp(
 
     # segment sum on the jacobian
     jac = jnp.transpose(x_jac.data, axes_order).reshape(-1, out_size)
+    # While we could just stop here and use a vmapped segment sum elementwise, it is more efficient
+    # to reduce the mask along repeated dimensions and do block segment sums.
     jac = jac.reshape(-1, *out_shape)
     idx = idx.reshape(-1, *out_shape)
     idx, repeated_dims = compact_repeated_dims_except(idx, 0)
@@ -101,10 +103,11 @@ def sparse_sum_jvp(
     jac_in_shape = jac.shape
     idx = idx.reshape(idx.shape[0], -1)
     jac = jac.reshape(*idx.shape[:2], -1)
+    # Compute output
     seg_sum = functools.partial(jax.ops.segment_sum, num_segments=out_dim)
-    out_jac = jax.vmap(seg_sum, in_axes=1, out_axes=1)(jac, idx).reshape(
-        out_dim, *jac_in_shape[1:]
-    )
+    out_jac = jax.vmap(seg_sum, in_axes=1, out_axes=1)(jac, idx)
+    # reshape back
+    out_jac = out_jac.reshape(out_dim, *jac_in_shape[1:])
     out_jac = np.transpose(out_jac, inv_order)
     out_jac = out_jac.reshape(out_dim, *out_shape)
     return y, FwdJacobian(out_jac, idx_out), y_lapl
