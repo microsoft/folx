@@ -112,7 +112,7 @@ def test_vjp(rng, batch_dim, sequence_dim, num_heads, head_dim, max_sequence, wi
     ref_o, ref_mha_vjp_fn = jax.vjp(ref_fn, q, k, v)
     ref_q_vjp, ref_k_vjp, ref_v_vjp = ref_mha_vjp_fn(o_vjp)
 
-    jax_fn = partial(custom_vjp_mha, mask=mask)
+    jax_fn = partial(custom_vjp_mha, mask=mask, input_mask=input_mask)
     if with_vmap:
         jax_fn = jax.vmap(jax_fn)
     jax_o, jax_mha_vjp_fn = jax.vjp(jax_fn, q, k, v)
