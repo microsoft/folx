@@ -5,9 +5,6 @@ import jax
 import jax.numpy as jnp
 from jax._src.pallas.pallas_call import pallas_call
 from jax._src.pallas.primitives import dot as pl_dot
-from jax._src.pallas.primitives import load as pl_load
-from jax._src.pallas.primitives import program_id
-from jax._src.state.indexing import dslice as pl_dslice
 
 from .mha import mha_kernel, reference_mha_kernel
 from .utils import (
