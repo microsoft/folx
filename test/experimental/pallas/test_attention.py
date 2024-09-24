@@ -1,10 +1,11 @@
 import math
+from functools import partial
 
 import jax
 import jax.numpy as jnp
 import pytest
 from folx.api import FwdJacobian, FwdLaplArray
-from folx.experimental.pallas import mha
+from folx.experimental.pallas import custom_vjp_mha
 
 
 def random_fwd_laplacian_qkv(rng, input_dim, batch_size, seq_len, num_heads, head_dim):
@@ -70,7 +71,63 @@ def test_mha(rng, batch_dim, sequence_dim, num_heads, head_dim, max_sequence):
     q, k, v, mask, input_mask = inputs_to_mha(
         rng, input_dim, batch_dim, sequence_dim, num_heads, head_dim, max_sequence, True
     )
-    o_pallas = mha(q, k, v, mask, input_mask, kernel="pallas", interpret=True)
-    o_reference = mha(q, k, v, mask, input_mask, kernel="reference", interpret=True)
+    o_pallas = custom_vjp_mha(q, k, v, mask, input_mask, kernel="pallas", interpret=True)
+    o_reference = custom_vjp_mha(q, k, v, mask, input_mask, kernel="reference", interpret=True)
 
     assert jnp.allclose(mask_array(o_pallas, mask), mask_array(o_reference, mask), atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    "rng, batch_dim, sequence_dim, num_heads, head_dim, max_sequence, with_vmap",
+    [
+        (jax.random.PRNGKey(3), 1, 1, 1, 1, 1, False),
+        (jax.random.PRNGKey(4), 1, 16, 4, 32, 16, False),
+        (jax.random.PRNGKey(5), 1, 16, 4, 32, 4, False),
+        (jax.random.PRNGKey(6), 1, 1, 1, 1, 1, True),
+        (jax.random.PRNGKey(7), 1, 16, 4, 32, 16, True),
+        (jax.random.PRNGKey(8), 1, 16, 4, 32, 4, True),
+    ],
+)
+def test_vjp(rng, batch_dim, sequence_dim, num_heads, head_dim, max_sequence, with_vmap):
+    input_dim = 3 * sequence_dim
+    q, k, v, mask, input_mask = inputs_to_mha(
+        rng, input_dim, batch_dim, sequence_dim, num_heads, head_dim, max_sequence, True
+    )
+    if with_vmap:
+        q, k, v = jax.tree.map(lambda x: x[None], (q, k, v))
+    o_vjp = q
+
+    fn = partial(custom_vjp_mha, mask=mask, input_mask=input_mask, kernel="pallas", interpret=True)
+    if with_vmap:
+        fn = jax.vmap(fn)
+    o, mha_vjp_fn = jax.vjp(fn, q, k, v)
+    q_vjp, k_vjp, v_vjp = mha_vjp_fn(o_vjp)
+
+    ref_fn = partial(
+        custom_vjp_mha, mask=mask, input_mask=input_mask, kernel="reference", interpret=True
+    )
+    if with_vmap:
+        ref_fn = jax.vmap(ref_fn)
+    ref_o, ref_mha_vjp_fn = jax.vjp(ref_fn, q, k, v)
+    ref_q_vjp, ref_k_vjp, ref_v_vjp = ref_mha_vjp_fn(o_vjp)
+
+    jax_fn = partial(custom_vjp_mha, mask=mask)
+    if with_vmap:
+        jax_fn = jax.vmap(jax_fn)
+    jax_o, jax_mha_vjp_fn = jax.vjp(jax_fn, q, k, v)
+    jax_q_vjp, jax_k_vjp, jax_v_vjp = jax_mha_vjp_fn(o_vjp)
+
+    assert jnp.allclose(mask_array(o, mask), mask_array(ref_o, mask), atol=1e-6)
+    assert jnp.allclose(mask_array(q_vjp, mask), mask_array(ref_q_vjp, mask), atol=1e-6)
+    assert jnp.allclose(mask_array(k_vjp, mask), mask_array(ref_k_vjp, mask), atol=1e-6)
+    assert jnp.allclose(mask_array(v_vjp, mask), mask_array(ref_v_vjp, mask))
+
+    assert jnp.allclose(mask_array(o, mask), mask_array(jax_o, mask), atol=1e-6)
+    assert jnp.allclose(mask_array(q_vjp, mask), mask_array(jax_q_vjp, mask), atol=1e-6)
+    assert jnp.allclose(mask_array(k_vjp, mask), mask_array(jax_k_vjp, mask), atol=1e-6)
+    assert jnp.allclose(mask_array(v_vjp, mask), mask_array(jax_v_vjp, mask))
+
+    assert jnp.allclose(mask_array(ref_o, mask), mask_array(jax_o, mask), atol=1e-6)
+    assert jnp.allclose(mask_array(ref_q_vjp, mask), mask_array(jax_q_vjp, mask), atol=1e-6)
+    assert jnp.allclose(mask_array(ref_k_vjp, mask), mask_array(jax_k_vjp, mask), atol=1e-6)
+    assert jnp.allclose(mask_array(ref_v_vjp, mask), mask_array(jax_v_vjp, mask))
