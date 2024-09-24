@@ -34,8 +34,7 @@ def mha_forward_laplacian(
     Laplacian of multi-head attention.
 
     The default settings, for ``q_block_len``, ``num_warps``, and ``num_stages`` reflect
-    the results of extensive benchmarking carried out using
-    notebooks/benchmark_flash_attention.ipynb.
+    the results of internal benchmarking.
 
     The input ``FwdLaplArray``s should have the following shapes:
         - x: ``(batch_size, sequence_length, num_heads, head_dim)``
