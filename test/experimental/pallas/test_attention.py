@@ -10,12 +10,14 @@ from folx.experimental.pallas import mha
 def random_fwd_laplacian_qkv(rng, input_dim, batch_size, seq_len, num_heads, head_dim):
     def inner(rng, sigma):
         rng_x, rng_jacobian, rng_laplacian = jax.random.split(rng, 3)
-        x = sigma * jax.random.normal(rng_x, (batch_size, seq_len, num_heads, head_dim))
+        x = sigma * jax.random.normal(
+            rng_x, (batch_size, seq_len, num_heads, head_dim), dtype=jnp.float32
+        )
         jacobian = sigma * jax.random.normal(
-            rng_jacobian, (input_dim, batch_size, seq_len, num_heads, head_dim)
+            rng_jacobian, (input_dim, batch_size, seq_len, num_heads, head_dim), dtype=jnp.float32
         )
         laplacian = sigma * jax.random.normal(
-            rng_laplacian, (batch_size, seq_len, num_heads, head_dim)
+            rng_laplacian, (batch_size, seq_len, num_heads, head_dim), dtype=jnp.float32
         )
         return FwdLaplArray(x, FwdJacobian.from_dense(jacobian), laplacian)
 
