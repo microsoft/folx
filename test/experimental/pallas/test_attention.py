@@ -7,6 +7,7 @@ import pytest
 from folx.api import FwdJacobian, FwdLaplArray
 from folx.experimental.pallas import custom_vjp_mha
 from folx.experimental.pallas.forward_laplacian import mha_forward_laplacian
+from folx.experimental.pallas.mha import reference_mha_kernel
 
 
 def random_fwd_laplacian_qkv(rng, input_dim, batch_size, seq_len, num_heads, head_dim):
@@ -112,7 +113,7 @@ def test_vjp(rng, batch_dim, sequence_dim, num_heads, head_dim, max_sequence, wi
     ref_o, ref_mha_vjp_fn = jax.vjp(ref_fn, q, k, v)
     ref_q_vjp, ref_k_vjp, ref_v_vjp = ref_mha_vjp_fn(o_vjp)
 
-    jax_fn = partial(custom_vjp_mha, mask=mask, input_mask=input_mask)
+    jax_fn = partial(reference_mha_kernel, mask=mask)
     if with_vmap:
         jax_fn = jax.vmap(jax_fn)
     jax_o, jax_mha_vjp_fn = jax.vjp(jax_fn, q, k, v)
