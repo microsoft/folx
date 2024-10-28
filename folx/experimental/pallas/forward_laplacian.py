@@ -20,7 +20,7 @@ from .utils import (
 
 
 def mha_forward_laplacian(
-    args: Tuple[jax.Array, jax.Array, jax.Array, jax.Array],
+    args: Tuple[FwdLaplArray, FwdLaplArray, FwdLaplArray, jax.Array, jax.Array],
     kwargs: Dict[str, Any],
     sparsity_threshold: int,
 ) -> FwdLaplArray:
@@ -128,6 +128,8 @@ def mha_forward_laplacian(
         )
     else:
         raise ValueError(f"Unknown forward Laplacian attention kernel: {kernel}")
+    # TODO: Can we avoid calling `.dense_array` on the Jacobians and instead use sparse matrices here?
+    # This would help with LapNet-like attention
     x, jacobian, laplacian = kernel_fn(
         q.x,
         q.jacobian.dense_array,

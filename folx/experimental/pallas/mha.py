@@ -108,7 +108,7 @@ def mha_kernel(
         q_block_len: pallas block length
     """
     # q_idx indicates the start index of the current q-block
-    q_idx = 0 if q_block_len is None else program_id(1)
+    q_idx = 0 if q_block_len is None else pl.program_id(1)
     q_block_len = q_block_len or q_ref.shape[0]
     kv_mask = mask_ref[:]
     # q_slice extracts the relevant slice of the q matrix
