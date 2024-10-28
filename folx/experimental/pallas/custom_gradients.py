@@ -3,8 +3,7 @@ from typing import Literal, Tuple
 
 import jax
 import jax.numpy as jnp
-from jax._src.pallas.pallas_call import pallas_call
-from jax._src.pallas.primitives import dot as pl_dot
+from jax.experimental import pallas as pl
 
 from .mha import mha_kernel, reference_mha_kernel
 from .utils import (
@@ -37,7 +36,7 @@ def mha_forward(
     q_block_len, kv_block_len = compute_q_and_kv_block_len(seq_len, q_block_len)
 
     if kernel == "pallas":
-        kernel_fn = pallas_call(
+        kernel_fn = pl.pallas_call(
             partial(mha_kernel, q_block_len=q_block_len),
             grid=create_grid(batch_len, seq_len, num_heads, q_block_len),
             in_specs=[
@@ -78,7 +77,7 @@ def mha_backward(
     q_block_len, kv_block_len = compute_q_and_kv_block_len(seq_len, q_block_len)
 
     if kernel == "pallas":
-        kernel_fn = pallas_call(
+        kernel_fn = pl.pallas_call(
             mha_backward_kernel,
             grid=create_grid(batch_len, seq_len, num_heads, q_block_len),
             in_specs=[
@@ -171,29 +170,29 @@ def mha_backward_kernel(
     q = jnp.where(mask[:, None], q_ref[:, :], 0.0)
     k = jnp.where(mask[:, None], k_ref[:, :], 0.0)
     v = jnp.where(mask[:, None], v_ref[:, :], 0.0)
-    s = jnp.where(square_mask, pl_dot(q, k, trans_b=True), -1e20)
+    s = jnp.where(square_mask, pl.dot(q, k, trans_b=True), -1e20)
     p = jax.nn.softmax(s)
 
     # Compute the VJPs
     o_vjp = o_vjp_ref[:, :]
 
     # v_vjp
-    v_vjp = pl_dot(p, o_vjp, trans_a=True)
+    v_vjp = pl.dot(p, o_vjp, trans_a=True)
     v_vjp_ref[:, :] = v_vjp
 
     # q_vjp
-    lo_v_p = pl_dot(o_vjp, v, trans_b=True) * p
+    lo_v_p = pl.dot(o_vjp, v, trans_b=True) * p
     ## First term
-    q_vjp = pl_dot(lo_v_p, k)
+    q_vjp = pl.dot(lo_v_p, k)
     ## Second term
-    pk = pl_dot(p, k)
+    pk = pl.dot(p, k)
     q_vjp -= pk * sum_columns(lo_v_p)
     q_vjp_ref[:, :] = q_vjp
 
     # k_vjp
     ## First term
-    k_vjp = pl_dot(lo_v_p.T, q)
+    k_vjp = pl.dot(lo_v_p.T, q)
     ## Second term
-    p_vjp = pl_dot(o_vjp, v, trans_b=True)
-    k_vjp -= pl_dot((p * sum_columns(p_vjp * p)), q, trans_a=True)
+    p_vjp = pl.dot(o_vjp, v, trans_b=True)
+    k_vjp -= pl.dot((p * sum_columns(p_vjp * p)), q, trans_a=True)
     k_vjp_ref[:, :] = k_vjp

@@ -5,11 +5,7 @@ import jax
 import jax.numpy as jnp
 from folx import forward_laplacian
 from folx.api import FwdJacobian, FwdLaplArray
-from jax._src.pallas.pallas_call import pallas_call
-from jax._src.pallas.primitives import dot as pl_dot
-from jax._src.pallas.primitives import load as pl_load
-from jax._src.pallas.primitives import program_id
-from jax._src.state.indexing import dslice as pl_dslice
+from jax.experimental import pallas as pl
 
 from .mha import reference_mha_kernel
 from .utils import (
@@ -24,10 +20,10 @@ from .utils import (
 
 
 def mha_forward_laplacian(
-    args,
+    args: Tuple[jax.Array, jax.Array, jax.Array, jax.Array],
     kwargs: Dict[str, Any],
     sparsity_threshold: int,
-):
+) -> FwdLaplArray:
     r"""Forward laplacian of attention, to be used with folx.
 
     This function should be passed to ``folx.register_function``, as the custom forward
@@ -84,7 +80,7 @@ def mha_forward_laplacian(
     elif kernel == "reference":
         kernel_fn = reference_mha_forward_laplacian_kernel
     elif kernel == "pallas":
-        kernel_fn = pallas_call(
+        kernel_fn = pl.pallas_call(
             partial(mha_forward_laplacian_kernel, q_block_len=q_block_len),
             grid=create_grid(batch_len, seq_len, num_heads, q_block_len),
             in_specs=[
@@ -340,7 +336,7 @@ def mha_forward_laplacian_kernel(
         o_lap_ref: Laplacian of output, shape ``(sequence_length, head_dim)``
     """
 
-    q_idx = 0 if q_block_len is None else program_id(1)
+    q_idx = 0 if q_block_len is None else pl.program_id(1)
     q_block_len = q_block_len or q_x_ref.shape[0]
     kv_mask = mask_ref[:]
     k = jnp.where(kv_mask[:, None], k_x_ref[:, :], 0.0)
@@ -348,26 +344,26 @@ def mha_forward_laplacian_kernel(
     k_lap = jnp.where(kv_mask[:, None], k_lap_ref[:, :], 0.0)
     v_lap = jnp.where(kv_mask[:, None], v_lap_ref[:, :], 0.0)
 
-    q_slice = pl_dslice(q_idx * q_block_len, q_block_len)
-    q_mask = pl_load(mask_ref, (q_slice,))
+    q_slice = pl.dslice(q_idx * q_block_len, q_block_len)
+    q_mask = pl.load(mask_ref, (q_slice,))
     square_mask = q_mask[:, None] * kv_mask[None, :]
     # Forward pass
     q = jnp.where(q_mask[:, None], q_x_ref[:, :], 0.0)
-    s = jnp.where(square_mask, pl_dot(q, k, trans_b=True), -1e20)
+    s = jnp.where(square_mask, pl.dot(q, k, trans_b=True), -1e20)
     p = jax.nn.softmax(s, axis=1)
-    o = pl_dot(p, v)
+    o = pl.dot(p, v)
     o_x_ref[:, :] = o
 
     # Laplacian L(h) J(F) terms
     # We don't need to mask q_lap, no cross-electron contributions
     q_lap = jnp.where(q_mask[:, None], q_lap_ref[:, :], 0.0)
-    qr2_k = pl_dot(q_lap, k, trans_b=True)
+    qr2_k = pl.dot(q_lap, k, trans_b=True)
     qr2_k_p = qr2_k * p
-    q_kr2 = pl_dot(q, k_lap, trans_b=True)
+    q_kr2 = pl.dot(q, k_lap, trans_b=True)
     q_kr2_p = q_kr2 * p
-    o_lap = pl_dot(qr2_k_p + q_kr2_p, v)  # QR^2 OQ first term and KR^2 OK first term
+    o_lap = pl.dot(qr2_k_p + q_kr2_p, v)  # QR^2 OQ first term and KR^2 OK first term
     o_lap -= sum_columns(qr2_k_p + q_kr2_p) * o  # QR^2 OQ second term and KR^2 OK second term
-    o_lap += pl_dot(p, v_lap)  ## VR^2 OV
+    o_lap += pl.dot(p, v_lap)  ## VR^2 OV
 
     def body_of_loop_over_elec_coords(p_idx, o_lap):
         # Jacobian
@@ -378,16 +374,16 @@ def mha_forward_laplacian_kernel(
         input_mask = input_mask_ref[p_idx]
 
         # Jacobian
-        qr_k = pl_dot(q_jac, k, trans_b=True)
-        q_kr = pl_dot(q, k_jac, trans_b=True)
+        qr_k = pl.dot(q_jac, k, trans_b=True)
+        q_kr = pl.dot(q, k_jac, trans_b=True)
         qr_k_q_kr_p = (qr_k + q_kr) * p
         ## First and third terms
-        o_jac = pl_dot(qr_k_q_kr_p, v)
+        o_jac = pl.dot(qr_k_q_kr_p, v)
         ## Second term and fourth terms
         qr_k_q_kr_p_sum = sum_columns(qr_k_q_kr_p)
         o_jac -= qr_k_q_kr_p_sum * o
         ## Fifth term
-        o_jac += pl_dot(p, v_jac)
+        o_jac += pl.dot(p, v_jac)
         o_jac_ref[p_idx, :, :] = o_jac
 
         # Laplacian J(h) H(F) J(h) terms
@@ -396,7 +392,7 @@ def mha_forward_laplacian_kernel(
         qr_k_p_sum = sum_columns(qr_k_p)
         q_kr_p = q_kr * p
         q_kr_p_sum = sum_columns(q_kr_p)
-        qr_kr_p = pl_dot(q_jac, k_jac, trans_b=True) * p
+        qr_kr_p = pl.dot(q_jac, k_jac, trans_b=True) * p
         multiplies_v = (
             qr_k_p * qr_k  # QR QR OQQ first term
             + q_kr_p * q_kr  # KR KR OKK first term
@@ -411,7 +407,7 @@ def mha_forward_laplacian_kernel(
                 + (qr_k_p_sum * q_kr_p_sum) * p  # QR KR OQK sixth term
             )
         )
-        o_lap_out = pl_dot(multiplies_v, v)
+        o_lap_out = pl.dot(multiplies_v, v)
         ## Multiplies o
         multiplies_o = (
             -sum_columns(qr_k**2 * p)  # QR QR OQQ fifth term
@@ -427,9 +423,9 @@ def mha_forward_laplacian_kernel(
         )
         o_lap_out += multiplies_o * o
         # VR KR OVK first term and VR QR OVQ first term
-        o_lap_out += pl_dot(2 * (q_kr_p + qr_k_p), v_jac)
+        o_lap_out += pl.dot(2 * (q_kr_p + qr_k_p), v_jac)
         ## VR KR OVK second term and VR QR OVQ second term
-        p_vr = pl_dot(p, v_jac)
+        p_vr = pl.dot(p, v_jac)
         o_lap_out -= 2 * (q_kr_p_sum + qr_k_p_sum) * p_vr
 
         return o_lap + input_mask * o_lap_out

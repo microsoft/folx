@@ -3,11 +3,7 @@ from typing import Literal
 
 import jax
 import jax.numpy as jnp
-from jax._src.pallas.pallas_call import pallas_call
-from jax._src.pallas.primitives import dot as pl_dot
-from jax._src.pallas.primitives import load as pl_load
-from jax._src.pallas.primitives import program_id
-from jax._src.state.indexing import dslice as pl_dslice
+from jax.experimental import pallas as pl
 
 from .utils import (
     compute_q_and_kv_block_len,
@@ -35,7 +31,7 @@ def mha(
     q_block_len, kv_block_len = compute_q_and_kv_block_len(seq_len, q_block_len)
 
     if kernel == "pallas":
-        kernel_fn = pallas_call(
+        kernel_fn = pl.pallas_call(
             partial(mha_kernel, q_block_len=q_block_len),
             grid=create_grid(batch_len, seq_len, num_heads, q_block_len),
             in_specs=[
@@ -102,14 +98,14 @@ def mha_kernel(
     q_idx = 0 if q_block_len is None else program_id(1)
     q_block_len = q_block_len or q_ref.shape[0]
     kv_mask = mask_ref[:]
-    q_slice = pl_dslice(q_idx * q_block_len, q_block_len)
-    q_mask = pl_load(mask_ref, (q_slice,))
+    q_slice = pl.dslice(q_idx * q_block_len, q_block_len)
+    q_mask = pl.load(mask_ref, (q_slice,))
     square_mask = q_mask[:, None] * kv_mask[None, :]
     # Forward pass
     q = jnp.where(q_mask[:, None], q_ref[:, :], 0.0)
     k = jnp.where(kv_mask[:, None], k_ref[:, :], 0.0)
     v = jnp.where(kv_mask[:, None], v_ref[:, :], 0.0)
-    s = jnp.where(square_mask, pl_dot(q, k, trans_b=True), -1e20)
+    s = jnp.where(square_mask, pl.dot(q, k, trans_b=True), -1e20)
     p = jax.nn.softmax(s, axis=1)
-    o = pl_dot(p, v)
+    o = pl.dot(p, v)
     o_ref[:, :] = o
