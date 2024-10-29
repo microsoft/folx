@@ -5,8 +5,9 @@ import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
 
-from .mha import mha_kernel, reference_mha_kernel
+from .mhsa import mhsa_kernel, reference_mhsa_kernel
 from .utils import (
+    big_number,
     compute_q_and_kv_block_len,
     create_grid,
     get_mask_block_spec,
@@ -19,17 +20,17 @@ from .utils import (
 #######################################################################################################
 
 
-def mha_forward(
+def mhsa_forward(
     q: jax.Array,
     k: jax.Array,
     v: jax.Array,
     mask: jax.Array,
     input_mask: jax.Array,
-    kernel: Literal["pallas", "reference"] = "pallas",
-    interpret: bool = False,
-    q_block_len: int | None = None,
-    num_warps: int = 4,
-    num_stages: int = 2,
+    kernel: Literal["pallas", "reference"],
+    interpret: bool,
+    q_block_len: int | None,
+    num_warps: int,
+    num_stages: int,
 ) -> Tuple[jax.Array, Tuple[jax.Array, jax.Array, jax.Array, jax.Array]]:
     del input_mask  # Only used in the forward Laplacian
     batch_len, seq_len, num_heads, head_len = q.shape
@@ -37,7 +38,7 @@ def mha_forward(
 
     if kernel == "pallas":
         kernel_fn = pl.pallas_call(
-            partial(mha_kernel, q_block_len=q_block_len),
+            partial(mhsa_kernel, q_block_len=q_block_len),
             grid=create_grid(batch_len, seq_len, num_heads, q_block_len),
             in_specs=[
                 get_value_or_laplacian_block_spec(seq_len, head_len, q_block_len),
@@ -52,17 +53,17 @@ def mha_forward(
             compiler_params=dict(triton=dict(num_warps=num_warps, num_stages=num_stages)),
             debug=False,
             interpret=interpret,
-            name="mha_forward",
+            name="mhsa_forward",
         )
     elif kernel == "reference":
-        kernel_fn = reference_mha_kernel
+        kernel_fn = reference_mhsa_kernel
     else:
         raise ValueError(f"Unknown multi-head attention kernel: {kernel}")
     o = kernel_fn(q, k, v, mask)
     return o, (q, k, v, mask)
 
 
-def mha_backward(
+def mhsa_backward(
     kernel: Literal["pallas", "reference"],
     interpret: bool,
     q_block_len: int | None,
@@ -78,7 +79,7 @@ def mha_backward(
 
     if kernel == "pallas":
         kernel_fn = pl.pallas_call(
-            mha_backward_kernel,
+            mhsa_backward_kernel,
             grid=create_grid(batch_len, seq_len, num_heads, q_block_len),
             in_specs=[
                 get_value_or_laplacian_block_spec(seq_len, head_len, q_block_len),
@@ -106,17 +107,17 @@ def mha_backward(
             compiler_params=dict(triton=dict(num_warps=num_warps, num_stages=num_stages)),
             debug=False,
             interpret=interpret,
-            name="mha_backward",
+            name="mhsa_backward",
         )
     elif kernel == "reference":
-        kernel_fn = reference_mha_backward_kernel
+        kernel_fn = reference_mhsa_backward_kernel
     else:
         raise ValueError(f"Unknown multi-head attention kernel: {kernel}")
     dq, dk, dv = kernel_fn(q, k, v, mask, o_vjp)
     return dq, dk, dv, None, None
 
 
-def reference_mha_backward_kernel(
+def reference_mhsa_backward_kernel(
     q: jax.Array, k: jax.Array, v: jax.Array, mask: jax.Array, o_vjp: jax.Array
 ) -> Tuple[jax.Array, jax.Array, jax.Array]:
     r"""Reference jax implementation of the multi-head attention backward kernel."""
@@ -124,7 +125,7 @@ def reference_mha_backward_kernel(
     q = jnp.where(mask[:, :, None, None], q, 0.0)
     square_mask = mask[:, None, None, :] * mask[:, :, None, None]
     s = jnp.einsum("Biha,Bjha->Bihj", q, k)
-    s = jnp.where(square_mask, s, -1e20)
+    s = jnp.where(square_mask, s, -big_number(q.dtype))
     p = jax.nn.softmax(s, axis=-1)
 
     # Compute the VJPs
@@ -140,7 +141,7 @@ def reference_mha_backward_kernel(
     return q_vjp, k_vjp, v_vjp
 
 
-def mha_backward_kernel(
+def mhsa_backward_kernel(
     q_ref,  # Inputs
     k_ref,
     v_ref,
@@ -170,7 +171,7 @@ def mha_backward_kernel(
     q = jnp.where(mask[:, None], q_ref[:, :], 0.0)
     k = jnp.where(mask[:, None], k_ref[:, :], 0.0)
     v = jnp.where(mask[:, None], v_ref[:, :], 0.0)
-    s = jnp.where(square_mask, pl.dot(q, k, trans_b=True), -1e20)
+    s = jnp.where(square_mask, pl.dot(q, k, trans_b=True), -big_number(q.dtype))
     p = jax.nn.softmax(s)
 
     # Compute the VJPs

@@ -6,6 +6,7 @@ import jax.numpy as jnp
 from jax.experimental import pallas as pl
 
 from .utils import (
+    big_number,
     compute_q_and_kv_block_len,
     create_grid,
     get_mask_block_spec,
@@ -13,7 +14,7 @@ from .utils import (
 )
 
 
-def mha(
+def mhsa(
     q: jax.Array,
     k: jax.Array,
     v: jax.Array,
@@ -44,7 +45,7 @@ def mha(
 
     if kernel == "pallas":
         kernel_fn = pl.pallas_call(
-            partial(mha_kernel, q_block_len=q_block_len),
+            partial(mhsa_kernel, q_block_len=q_block_len),
             grid=create_grid(batch_len, seq_len, num_heads, q_block_len),
             in_specs=[
                 get_value_or_laplacian_block_spec(seq_len, head_len, q_block_len),
@@ -59,17 +60,17 @@ def mha(
             compiler_params=dict(triton=dict(num_warps=num_warps, num_stages=num_stages)),
             debug=False,
             interpret=interpret,
-            name="mha",
+            name="mhsa",
         )
     elif kernel == "reference":
-        kernel_fn = reference_mha_kernel
+        kernel_fn = reference_mhsa_kernel
     else:
         raise ValueError(f"Unknown multi-head attention kernel: {kernel}")
     o = kernel_fn(q, k, v, mask)
     return o
 
 
-def reference_mha_kernel(
+def reference_mhsa_kernel(
     q: jax.Array,
     k: jax.Array,
     v: jax.Array,
@@ -81,13 +82,13 @@ def reference_mha_kernel(
     # [batch_len, seq_len, num_heads, seq_len]
     square_mask = mask[:, None, None, :] * mask[:, :, None, None]
     s = jnp.einsum("Biha,Bjha->Bihj", q, k)
-    s = jnp.where(square_mask, s, -1e20)
+    s = jnp.where(square_mask, s, -big_number(s.dtype))
     p = jax.nn.softmax(s, axis=-1)
     o = jnp.einsum("Bihj,Bjha->Biha", p, v)
     return o
 
 
-def mha_kernel(
+def mhsa_kernel(
     q_ref,  # Inputs
     k_ref,
     v_ref,
@@ -116,10 +117,10 @@ def mha_kernel(
     q_mask = pl.load(mask_ref, (q_slice,))
     square_mask = q_mask[:, None] * kv_mask[None, :]
     # Forward pass
-    q = jnp.where(q_mask[:, None], q_ref[:, :], 0.0)
+    q = jnp.where(q_mask[:, None], q_ref[q_slice, :], 0.0)
     k = jnp.where(kv_mask[:, None], k_ref[:, :], 0.0)
     v = jnp.where(kv_mask[:, None], v_ref[:, :], 0.0)
-    s = jnp.where(square_mask, pl.dot(q, k, trans_b=True), -1e20)
+    s = jnp.where(square_mask, pl.dot(q, k, trans_b=True), -big_number(q.dtype))
     p = jax.nn.softmax(s, axis=1)
     o = pl.dot(p, v)
     o_ref[:, :] = o

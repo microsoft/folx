@@ -5,9 +5,9 @@ import jax
 import jax.numpy as jnp
 import pytest
 from folx.api import FwdJacobian, FwdLaplArray
-from folx.experimental.pallas import custom_vjp_mha
-from folx.experimental.pallas.forward_laplacian import mha_forward_laplacian
-from folx.experimental.pallas.mha import reference_mha_kernel
+from folx.experimental.pallas.attention import custom_vjp_mhsa
+from folx.experimental.pallas.attention.forward_laplacian import mhsa_forward_laplacian
+from folx.experimental.pallas.attention.mhsa import reference_mhsa_kernel
 
 
 def random_fwd_laplacian_qkv(rng, input_dim, batch_size, seq_len, num_heads, head_dim):
@@ -29,7 +29,7 @@ def random_fwd_laplacian_qkv(rng, input_dim, batch_size, seq_len, num_heads, hea
     return q, k, v
 
 
-def inputs_to_mha(
+def inputs_to_mhsa(
     rng: jax.Array,
     input_dim: int,
     batch_dim: int,
@@ -68,13 +68,13 @@ def mask_fwd_lapl_array(fwd_lap, mask, input_mask):
         (jax.random.PRNGKey(2), 1, 16, 4, 32, 4),
     ],
 )
-def test_mha(rng, batch_dim, sequence_dim, num_heads, head_dim, max_sequence):
+def test_mhsa(rng, batch_dim, sequence_dim, num_heads, head_dim, max_sequence):
     input_dim = 3 * sequence_dim
-    q, k, v, mask, input_mask = inputs_to_mha(
+    q, k, v, mask, input_mask = inputs_to_mhsa(
         rng, input_dim, batch_dim, sequence_dim, num_heads, head_dim, max_sequence, True
     )
-    o_pallas = custom_vjp_mha(q, k, v, mask, input_mask, kernel="pallas", interpret=True)
-    o_reference = custom_vjp_mha(q, k, v, mask, input_mask, kernel="reference", interpret=True)
+    o_pallas = custom_vjp_mhsa(q, k, v, mask, input_mask, kernel="pallas", interpret=True)
+    o_reference = custom_vjp_mhsa(q, k, v, mask, input_mask, kernel="reference", interpret=True)
 
     assert jnp.allclose(mask_array(o_pallas, mask), mask_array(o_reference, mask), atol=1e-6)
 
@@ -92,33 +92,36 @@ def test_mha(rng, batch_dim, sequence_dim, num_heads, head_dim, max_sequence):
 )
 def test_vjp(rng, batch_dim, sequence_dim, num_heads, head_dim, max_sequence, with_vmap):
     input_dim = 3 * sequence_dim
-    q, k, v, mask, input_mask = inputs_to_mha(
+    q, k, v, mask, input_mask = inputs_to_mhsa(
         rng, input_dim, batch_dim, sequence_dim, num_heads, head_dim, max_sequence, True
     )
     if with_vmap:
         q, k, v = jax.tree.map(lambda x: x[None], (q, k, v))
     o_vjp = q
 
-    fn = partial(custom_vjp_mha, mask=mask, input_mask=input_mask, kernel="pallas", interpret=True)
+    fn = partial(custom_vjp_mhsa, mask=mask, input_mask=input_mask, kernel="pallas", interpret=True)
     if with_vmap:
         fn = jax.vmap(fn)
-    o, mha_vjp_fn = jax.vjp(fn, q, k, v)
-    q_vjp, k_vjp, v_vjp = mha_vjp_fn(o_vjp)
+    o, mhsa_vjp_fn = jax.vjp(fn, q, k, v)
+    q_vjp, k_vjp, v_vjp = mhsa_vjp_fn(o_vjp)
 
     ref_fn = partial(
-        custom_vjp_mha, mask=mask, input_mask=input_mask, kernel="reference", interpret=True
+        custom_vjp_mhsa, mask=mask, input_mask=input_mask, kernel="reference", interpret=True
     )
     if with_vmap:
         ref_fn = jax.vmap(ref_fn)
-    ref_o, ref_mha_vjp_fn = jax.vjp(ref_fn, q, k, v)
-    ref_q_vjp, ref_k_vjp, ref_v_vjp = ref_mha_vjp_fn(o_vjp)
+    ref_o, ref_mhsa_vjp_fn = jax.vjp(ref_fn, q, k, v)
+    ref_q_vjp, ref_k_vjp, ref_v_vjp = ref_mhsa_vjp_fn(o_vjp)
 
-    jax_fn = partial(reference_mha_kernel, mask=mask)
+    jax_fn = partial(reference_mhsa_kernel, mask=mask)
     if with_vmap:
         jax_fn = jax.vmap(jax_fn)
-    jax_o, jax_mha_vjp_fn = jax.vjp(jax_fn, q, k, v)
-    jax_q_vjp, jax_k_vjp, jax_v_vjp = jax_mha_vjp_fn(o_vjp)
+    jax_o, jax_mhsa_vjp_fn = jax.vjp(jax_fn, q, k, v)
+    jax_q_vjp, jax_k_vjp, jax_v_vjp = jax_mhsa_vjp_fn(o_vjp)
 
+    print("ours", mask_array(k_vjp, mask))
+    print("jax", mask_array(jax_k_vjp, mask))
+    print("ref", mask_array(ref_k_vjp, mask))
     assert jnp.allclose(mask_array(o, mask), mask_array(ref_o, mask), atol=1e-6)
     assert jnp.allclose(mask_array(q_vjp, mask), mask_array(ref_q_vjp, mask), atol=1e-6)
     assert jnp.allclose(mask_array(k_vjp, mask), mask_array(ref_k_vjp, mask), atol=1e-6)
@@ -145,26 +148,26 @@ def test_vjp(rng, batch_dim, sequence_dim, num_heads, head_dim, max_sequence, wi
 )
 def test_forward_laplacian(rng, batch_dim, sequence_dim, num_heads, head_dim, max_sequence):
     input_dim = 3 * sequence_dim
-    q, k, v, mask, input_mask = inputs_to_mha(
+    q, k, v, mask, input_mask = inputs_to_mhsa(
         rng, input_dim, batch_dim, sequence_dim, num_heads, head_dim, max_sequence, False
     )
 
     folx_out = mask_fwd_lapl_array(
-        mha_forward_laplacian(
+        mhsa_forward_laplacian(
             (q, k, v, mask, input_mask), {"kernel": "folx", "interpret": True}, 0
         ),
         mask,
         input_mask,
     )
     ref_out = mask_fwd_lapl_array(
-        mha_forward_laplacian(
+        mhsa_forward_laplacian(
             (q, k, v, mask, input_mask), {"kernel": "reference", "interpret": True}, 0
         ),
         mask,
         input_mask,
     )
     out = mask_fwd_lapl_array(
-        mha_forward_laplacian(
+        mhsa_forward_laplacian(
             (q, k, v, mask, input_mask), {"kernel": "pallas", "interpret": True}, 0
         ),
         mask,

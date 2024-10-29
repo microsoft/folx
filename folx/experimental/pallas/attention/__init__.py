@@ -4,19 +4,20 @@ from typing import Literal
 import jax
 from folx import register_function
 
-from .custom_gradients import mha_backward, mha_forward
-from .forward_laplacian import mha_forward_laplacian
-from .mha import mha
+from .custom_gradients import mhsa_backward, mhsa_forward
+from .forward_laplacian import mhsa_forward_laplacian
+from .mhsa import mhsa
 
-custom_vjp_mha = jax.custom_vjp(mha, nondiff_argnums=(5, 6, 7, 8, 9))
-custom_vjp_mha.defvjp(mha_forward, mha_backward)
+custom_vjp_mhsa = jax.custom_vjp(mhsa, nondiff_argnums=(5, 6, 7, 8, 9))
+custom_vjp_mhsa.defvjp(mhsa_forward, mhsa_backward)
 
 
 @partial(jax.jit, static_argnums=(5, 6, 7, 8, 9))
-def multi_head_attention(
+def multi_head_self_attention(
     q: jax.Array,
     k: jax.Array,
     v: jax.Array,
+    # TODO: support multiple masks for cross-attention
     mask: jax.Array,
     input_mask: jax.Array,
     kernel: Literal["pallas", "reference"] = "pallas",
@@ -50,10 +51,10 @@ def multi_head_attention(
           array, otherwise it's blocked into blocks of length ``q_block_len``.
           Default is ``None``.
         num_warps (int): The number of threads to execute a single instance of the
-          kernel with. Default is 4.
+          kernel with. Default is 2.
         num_stages (int): The number of stages. Default is 2.
     """
-    return custom_vjp_mha(
+    return custom_vjp_mhsa(
         q,
         k,
         v,
@@ -67,7 +68,7 @@ def multi_head_attention(
     )
 
 
-register_function("multi_head_attention", mha_forward_laplacian)
+register_function("multi_head_self_attention", mhsa_forward_laplacian)
 
 
-__all__ = ["multi_head_attention"]
+__all__ = ["multi_head_self_attention"]

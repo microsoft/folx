@@ -7,8 +7,9 @@ from folx import forward_laplacian
 from folx.api import FwdJacobian, FwdLaplArray
 from jax.experimental import pallas as pl
 
-from .mha import reference_mha_kernel
+from .mhsa import reference_mhsa_kernel
 from .utils import (
+    big_number,
     compute_q_and_kv_block_len,
     create_grid,
     get_input_mask_block_spec,
@@ -19,7 +20,7 @@ from .utils import (
 )
 
 
-def mha_forward_laplacian(
+def mhsa_forward_laplacian(
     args: Tuple[FwdLaplArray, FwdLaplArray, FwdLaplArray, jax.Array, jax.Array],
     kwargs: Dict[str, Any],
     sparsity_threshold: int,
@@ -76,12 +77,12 @@ def mha_forward_laplacian(
     q_block_len, kv_block_len = compute_q_and_kv_block_len(seq_len, q_block_len)
 
     if kernel == "folx":
-        kernel_fn = folx_mha_forward_laplacian_kernel
+        kernel_fn = folx_mhsa_forward_laplacian_kernel
     elif kernel == "reference":
-        kernel_fn = reference_mha_forward_laplacian_kernel
+        kernel_fn = reference_mhsa_forward_laplacian_kernel
     elif kernel == "pallas":
         kernel_fn = pl.pallas_call(
-            partial(mha_forward_laplacian_kernel, q_block_len=q_block_len),
+            partial(mhsa_forward_laplacian_kernel, q_block_len=q_block_len),
             grid=create_grid(batch_len, seq_len, num_heads, q_block_len),
             in_specs=[
                 get_value_or_laplacian_block_spec(seq_len, head_len, q_block_len, True),  # q.x
@@ -124,7 +125,7 @@ def mha_forward_laplacian(
             compiler_params=dict(triton=dict(num_warps=num_warps, num_stages=num_stages)),
             debug=False,
             interpret=interpret,
-            name="mha_forward_laplacian",
+            name="mhsa_forward_laplacian",
         )
     else:
         raise ValueError(f"Unknown forward Laplacian attention kernel: {kernel}")
@@ -147,7 +148,7 @@ def mha_forward_laplacian(
 
 
 @jax.jit
-def folx_mha_forward_laplacian_kernel(
+def folx_mhsa_forward_laplacian_kernel(
     q: jax.Array,
     q_jac: jax.Array,
     q_lap: jax.Array,
@@ -170,12 +171,12 @@ def folx_mha_forward_laplacian_kernel(
     v_fwd_lap = FwdLaplArray(
         v, FwdJacobian.from_dense(v_jac * input_mask[..., None, None, None]), v_lap
     )
-    o_fwd_lap = forward_laplacian(reference_mha_kernel)(q_fwd_lap, k_fwd_lap, v_fwd_lap, mask)  # type: ignore
+    o_fwd_lap = forward_laplacian(reference_mhsa_kernel)(q_fwd_lap, k_fwd_lap, v_fwd_lap, mask)  # type: ignore
     return o_fwd_lap.x, o_fwd_lap.jacobian.dense_array, o_fwd_lap.laplacian
 
 
 @jax.jit
-def reference_mha_forward_laplacian_kernel(
+def reference_mhsa_forward_laplacian_kernel(
     q: jax.Array,
     q_jac: jax.Array,
     q_lap: jax.Array,
@@ -206,7 +207,7 @@ def reference_mha_forward_laplacian_kernel(
     v_lap = jnp.where(qkv_mask, v_lap, 0.0)
     # Forward
     s = jnp.einsum("Bnhd,BNhd->BnhN", q, k)
-    s = jnp.where(square_mask, s, -1e20)
+    s = jnp.where(square_mask, s, -big_number(s.dtype))
     p = jax.nn.softmax(s, axis=-1)
     o = jnp.einsum("BnhN,BNhd->Bnhd", p, v)
 
@@ -300,7 +301,7 @@ def reference_mha_forward_laplacian_kernel(
     return o, o_jac, o_lap
 
 
-def mha_forward_laplacian_kernel(
+def mhsa_forward_laplacian_kernel(
     q_x_ref,  # Inputs
     q_jac_ref,
     q_lap_ref,
@@ -350,15 +351,15 @@ def mha_forward_laplacian_kernel(
     q_mask = pl.load(mask_ref, (q_slice,))
     square_mask = q_mask[:, None] * kv_mask[None, :]
     # Forward pass
-    q = jnp.where(q_mask[:, None], q_x_ref[:, :], 0.0)
-    s = jnp.where(square_mask, pl.dot(q, k, trans_b=True), -1e20)
+    q = jnp.where(q_mask[:, None], q_x_ref[q_slice, :], 0.0)
+    s = jnp.where(square_mask, pl.dot(q, k, trans_b=True), -big_number(q.dtype))
     p = jax.nn.softmax(s, axis=1)
     o = pl.dot(p, v)
     o_x_ref[:, :] = o
 
     # Laplacian L(h) J(F) terms
     # We don't need to mask q_lap, no cross-electron contributions
-    q_lap = jnp.where(q_mask[:, None], q_lap_ref[:, :], 0.0)
+    q_lap = jnp.where(q_mask[:, None], q_lap_ref[q_slice, :], 0.0)
     qr2_k = pl.dot(q_lap, k, trans_b=True)
     qr2_k_p = qr2_k * p
     q_kr2 = pl.dot(q, k_lap, trans_b=True)
@@ -370,7 +371,7 @@ def mha_forward_laplacian_kernel(
     def body_of_loop_over_elec_coords(p_idx, o_lap):
         # Jacobian
         # We don't need to mask the electron coordinate axis of the Jacobian, no cross-electron-coordinate contributions
-        q_jac = jnp.where(q_mask[:, None], q_jac_ref[p_idx, :, :], 0.0)
+        q_jac = jnp.where(q_mask[:, None], q_jac_ref[p_idx, q_slice, :], 0.0)
         k_jac = jnp.where(kv_mask[:, None], k_jac_ref[p_idx, :, :], 0.0)
         v_jac = jnp.where(kv_mask[:, None], v_jac_ref[p_idx, :, :], 0.0)
         input_mask = input_mask_ref[p_idx]

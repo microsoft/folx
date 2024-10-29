@@ -1,6 +1,7 @@
 from typing import Optional, Tuple
 
 import jax
+import jax.numpy as jnp
 from jax.experimental import pallas as pl
 
 
@@ -159,3 +160,16 @@ def compute_q_and_kv_block_len(
         q_block_len = min(seq_len, q_block_len)
     kv_block_len = None if q_block_len is None else seq_len
     return q_block_len, kv_block_len
+
+
+def big_number(dtype):
+    if dtype == jnp.float16:
+        return jnp.asarray(1e10, dtype=dtype)
+    elif dtype == jnp.bfloat16:
+        return jnp.asarray(1e20, dtype=dtype)
+    elif dtype == jnp.float32:
+        return jnp.asarray(1e20, dtype=dtype)
+    elif dtype == jnp.float64:
+        return jnp.asarray(1e40, dtype=dtype)
+    else:
+        raise ValueError(f"Unexpected dtype {dtype}")
