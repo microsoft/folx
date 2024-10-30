@@ -117,9 +117,9 @@ def mhsa_kernel(
     q_mask = pl.load(mask_ref, (q_slice,))
     square_mask = q_mask[:, None] * kv_mask[None, :]
     # Forward pass
-    q = jnp.where(q_mask[:, None], q_ref[:, :], 0.0)
-    k = jnp.where(kv_mask[:, None], k_ref[:, :], 0.0)
-    v = jnp.where(kv_mask[:, None], v_ref[:, :], 0.0)
+    q = q_ref[:, :]
+    k = k_ref[:, :]
+    v = v_ref[:, :]
     s = jnp.where(square_mask, pl.dot(q, k, trans_b=True), -big_number(q.dtype))
     p = jax.nn.softmax(s, axis=1)
     o = pl.dot(p, v)

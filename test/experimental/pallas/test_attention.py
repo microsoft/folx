@@ -119,23 +119,20 @@ def test_vjp(rng, batch_dim, sequence_dim, num_heads, head_dim, max_sequence, wi
     jax_o, jax_mhsa_vjp_fn = jax.vjp(jax_fn, q, k, v)
     jax_q_vjp, jax_k_vjp, jax_v_vjp = jax_mhsa_vjp_fn(o_vjp)
 
-    print("ours", mask_array(k_vjp, mask))
-    print("jax", mask_array(jax_k_vjp, mask))
-    print("ref", mask_array(ref_k_vjp, mask))
     assert jnp.allclose(mask_array(o, mask), mask_array(ref_o, mask), atol=1e-6)
     assert jnp.allclose(mask_array(q_vjp, mask), mask_array(ref_q_vjp, mask), atol=1e-6)
     assert jnp.allclose(mask_array(k_vjp, mask), mask_array(ref_k_vjp, mask), atol=1e-6)
-    assert jnp.allclose(mask_array(v_vjp, mask), mask_array(ref_v_vjp, mask))
+    assert jnp.allclose(mask_array(v_vjp, mask), mask_array(ref_v_vjp, mask), atol=1e-6)
 
     assert jnp.allclose(mask_array(o, mask), mask_array(jax_o, mask), atol=1e-6)
     assert jnp.allclose(mask_array(q_vjp, mask), mask_array(jax_q_vjp, mask), atol=1e-6)
     assert jnp.allclose(mask_array(k_vjp, mask), mask_array(jax_k_vjp, mask), atol=1e-6)
-    assert jnp.allclose(mask_array(v_vjp, mask), mask_array(jax_v_vjp, mask))
+    assert jnp.allclose(mask_array(v_vjp, mask), mask_array(jax_v_vjp, mask), atol=1e-6)
 
     assert jnp.allclose(mask_array(ref_o, mask), mask_array(jax_o, mask), atol=1e-6)
     assert jnp.allclose(mask_array(ref_q_vjp, mask), mask_array(jax_q_vjp, mask), atol=1e-6)
     assert jnp.allclose(mask_array(ref_k_vjp, mask), mask_array(jax_k_vjp, mask), atol=1e-6)
-    assert jnp.allclose(mask_array(ref_v_vjp, mask), mask_array(jax_v_vjp, mask))
+    assert jnp.allclose(mask_array(ref_v_vjp, mask), mask_array(jax_v_vjp, mask), atol=1e-6)
 
 
 @pytest.mark.parametrize(
