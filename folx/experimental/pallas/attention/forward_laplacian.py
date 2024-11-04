@@ -196,9 +196,6 @@ def reference_mhsa_forward_laplacian_kernel(
     coordinate_and_electron_mask = input_mask[:, :, None, None, None] * mask[None, :, :, None, None]
     # [batch_size, seq_len, num_heads, head_dim]
     qkv_mask = mask[:, :, None, None]
-    q = jnp.where(qkv_mask, q, 0.0)
-    k = jnp.where(qkv_mask, k, 0.0)
-    v = jnp.where(qkv_mask, v, 0.0)
     q_jac = jnp.where(coordinate_and_electron_mask, q_jac, 0.0)
     k_jac = jnp.where(coordinate_and_electron_mask, k_jac, 0.0)
     v_jac = jnp.where(coordinate_and_electron_mask, v_jac, 0.0)
@@ -342,8 +339,8 @@ def mhsa_forward_laplacian_kernel(
     q_idx = 0 if q_block_len is None else pl.program_id(1)
     q_block_len = q_block_len or q_x_ref.shape[0]
     kv_mask = mask_ref[:]
-    k = jnp.where(kv_mask[:, None], k_x_ref[:, :], 0.0)
-    v = jnp.where(kv_mask[:, None], v_x_ref[:, :], 0.0)
+    k = k_x_ref[:, :]
+    v = v_x_ref[:, :]
     k_lap = jnp.where(kv_mask[:, None], k_lap_ref[:, :], 0.0)
     v_lap = jnp.where(kv_mask[:, None], v_lap_ref[:, :], 0.0)
 
@@ -351,7 +348,7 @@ def mhsa_forward_laplacian_kernel(
     q_mask = pl.load(mask_ref, (q_slice,))
     square_mask = q_mask[:, None] * kv_mask[None, :]
     # Forward pass
-    q = jnp.where(q_mask[:, None], q_x_ref[:, :], 0.0)
+    q = q_x_ref[:, :]
     s = jnp.where(square_mask, pl.dot(q, k, trans_b=True), -big_number(q.dtype))
     p = jax.nn.softmax(s, axis=1)
     o = pl.dot(p, v)
