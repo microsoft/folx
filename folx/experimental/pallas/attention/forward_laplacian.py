@@ -1,3 +1,4 @@
+import logging
 from functools import partial
 from typing import Any, Dict, Tuple
 
@@ -80,6 +81,10 @@ def mhsa_forward_laplacian(
     if kernel == 'folx':
         kernel_fn = folx_mhsa_forward_laplacian_kernel
     elif kernel == 'reference':
+        logging.warning(
+            'Passing kernel="reference" to function mhsa is not recommended in production, '
+            'as it is very slow. Use kernel="pallas" instead.'
+        )
         kernel_fn = reference_mhsa_forward_laplacian_kernel
     elif kernel == 'pallas':
         kernel_fn = pl.pallas_call(

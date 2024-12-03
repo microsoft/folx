@@ -1,3 +1,4 @@
+import logging
 from functools import partial
 from typing import Literal
 
@@ -63,6 +64,11 @@ def mhsa(
             debug=False,
             interpret=interpret,
             name='mhsa',
+        )
+    elif kernel == 'reference':
+        logging.warning(
+            'Passing kernel="reference" to function mhsa is not recommended in production, '
+            'as it is very slow. Use kernel="pallas" instead.'
         )
         kernel_fn = reference_mhsa_kernel
     else:

@@ -1,3 +1,4 @@
+import logging
 from functools import partial
 from typing import Literal, Tuple
 
@@ -58,6 +59,10 @@ def mhsa_forward(
             name='mhsa_forward',
         )
     elif kernel == 'reference':
+        logging.warning(
+            'Passing kernel="reference" to function mhsa is not recommended in production, '
+            'as it is very slow. Use kernel="pallas" instead.'
+        )
         kernel_fn = reference_mhsa_kernel
     else:
         raise ValueError(f'Unknown multi-head attention kernel: {kernel}')
