@@ -26,7 +26,7 @@ def mhsa_forward(
     v: jax.Array,
     mask: jax.Array,
     input_mask: jax.Array,
-    kernel: Literal["pallas", "reference"],
+    kernel: Literal['pallas', 'reference'],
     interpret: bool,
     q_block_len: int | None,
     num_warps: int,
@@ -36,7 +36,7 @@ def mhsa_forward(
     batch_len, seq_len, num_heads, head_len = q.shape
     q_block_len, kv_block_len = compute_q_and_kv_block_len(seq_len, q_block_len)
 
-    if kernel == "pallas":
+    if kernel == 'pallas':
         kernel_fn = pl.pallas_call(
             partial(mhsa_kernel, q_block_len=q_block_len),
             grid=create_grid(batch_len, seq_len, num_heads, q_block_len),
@@ -50,21 +50,23 @@ def mhsa_forward(
             out_shape=jax.ShapeDtypeStruct(
                 shape=(batch_len, seq_len, num_heads, head_len), dtype=q.dtype
             ),
-            compiler_params=dict(triton=dict(num_warps=num_warps, num_stages=num_stages)),
+            compiler_params=dict(
+                triton=dict(num_warps=num_warps, num_stages=num_stages)
+            ),
             debug=False,
             interpret=interpret,
-            name="mhsa_forward",
+            name='mhsa_forward',
         )
-    elif kernel == "reference":
+    elif kernel == 'reference':
         kernel_fn = reference_mhsa_kernel
     else:
-        raise ValueError(f"Unknown multi-head attention kernel: {kernel}")
+        raise ValueError(f'Unknown multi-head attention kernel: {kernel}')
     o = kernel_fn(q, k, v, mask)
     return o, (q, k, v, mask)
 
 
 def mhsa_backward(
-    kernel: Literal["pallas", "reference"],
+    kernel: Literal['pallas', 'reference'],
     interpret: bool,
     q_block_len: int | None,
     num_warps: int,
@@ -72,12 +74,12 @@ def mhsa_backward(
     fwd_cache: Tuple[jax.Array, jax.Array, jax.Array, jax.Array],
     o_vjp: jax.Array,
 ) -> Tuple[jax.Array, jax.Array, jax.Array, None, None]:
-    assert q_block_len is None, "Q blocking is not implemented in backward"
+    assert q_block_len is None, 'Q blocking is not implemented in backward'
     q, k, v, mask = fwd_cache
     batch_len, seq_len, num_heads, head_len = q.shape
     q_block_len, kv_block_len = compute_q_and_kv_block_len(seq_len, q_block_len)
 
-    if kernel == "pallas":
+    if kernel == 'pallas':
         kernel_fn = pl.pallas_call(
             mhsa_backward_kernel,
             grid=create_grid(batch_len, seq_len, num_heads, q_block_len),
@@ -104,15 +106,17 @@ def mhsa_backward(
                     shape=(batch_len, seq_len, num_heads, head_len), dtype=q.dtype
                 ),
             ],
-            compiler_params=dict(triton=dict(num_warps=num_warps, num_stages=num_stages)),
+            compiler_params=dict(
+                triton=dict(num_warps=num_warps, num_stages=num_stages)
+            ),
             debug=False,
             interpret=interpret,
-            name="mhsa_backward",
+            name='mhsa_backward',
         )
-    elif kernel == "reference":
+    elif kernel == 'reference':
         kernel_fn = reference_mhsa_backward_kernel
     else:
-        raise ValueError(f"Unknown multi-head attention kernel: {kernel}")
+        raise ValueError(f'Unknown multi-head attention kernel: {kernel}')
     dq, dk, dv = kernel_fn(q, k, v, mask, o_vjp)
     return dq, dk, dv, None, None
 
@@ -124,19 +128,19 @@ def reference_mhsa_backward_kernel(
     # [batch_size, seq_len, num_heads, seq_len]
     q = jnp.where(mask[:, :, None, None], q, 0.0)
     square_mask = mask[:, None, None, :] * mask[:, :, None, None]
-    s = jnp.einsum("Biha,Bjha->Bihj", q, k)
+    s = jnp.einsum('Biha,Bjha->Bihj', q, k)
     s = jnp.where(square_mask, s, -big_number(q.dtype))
     p = jax.nn.softmax(s, axis=-1)
 
     # Compute the VJPs
-    p_vjp = jnp.einsum("Biha,Bjha->Bihj", o_vjp, v)
-    q_vjp = jnp.einsum("Bkha,Bihk,Bihk->Biha", k, p, p_vjp) - jnp.einsum(
-        "Bmha,Bihk,Bihm,Bihk->Biha", k, p, p, p_vjp
+    p_vjp = jnp.einsum('Biha,Bjha->Bihj', o_vjp, v)
+    q_vjp = jnp.einsum('Bkha,Bihk,Bihk->Biha', k, p, p_vjp) - jnp.einsum(
+        'Bmha,Bihk,Bihm,Bihk->Biha', k, p, p, p_vjp
     )
-    k_vjp = jnp.einsum("Bjha,Bjhi,Bjhi->Biha", q, p, p_vjp) - jnp.einsum(
-        "Bjha,Bjhk,Bjhi,Bjhk->Biha", q, p, p, p_vjp
+    k_vjp = jnp.einsum('Bjha,Bjhi,Bjhi->Biha', q, p, p_vjp) - jnp.einsum(
+        'Bjha,Bjhk,Bjhi,Bjhk->Biha', q, p, p, p_vjp
     )
-    v_vjp = jnp.einsum("Bjhi,Bjha->Biha", p, o_vjp)
+    v_vjp = jnp.einsum('Bjhi,Bjha->Biha', p, o_vjp)
 
     return q_vjp, k_vjp, v_vjp
 

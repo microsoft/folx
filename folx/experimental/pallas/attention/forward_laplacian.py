@@ -3,9 +3,10 @@ from typing import Any, Dict, Tuple
 
 import jax
 import jax.numpy as jnp
+from jax.experimental import pallas as pl
+
 from folx import forward_laplacian
 from folx.api import FwdJacobian, FwdLaplArray
-from jax.experimental import pallas as pl
 
 from .mhsa import reference_mhsa_kernel
 from .utils import (
@@ -68,41 +69,57 @@ def mhsa_forward_laplacian(
     assert len(input_mask) == len(q.jacobian.dense_array)
     input_len, batch_len, seq_len, num_heads, head_len = q.jacobian.dense_array.shape
 
-    kernel = kwargs.get("kernel", "pallas")
-    interpret = kwargs.get("interpret", False)
-    q_block_len = kwargs.get("q_block_len", 16)
-    num_warps = kwargs.get("num_warps", seq_len // 8)
-    num_stages = kwargs.get("num_stages", 1)
+    kernel = kwargs.get('kernel', 'pallas')
+    interpret = kwargs.get('interpret', False)
+    q_block_len = kwargs.get('q_block_len', 16)
+    num_warps = kwargs.get('num_warps', seq_len // 8)
+    num_stages = kwargs.get('num_stages', 1)
 
     q_block_len, kv_block_len = compute_q_and_kv_block_len(seq_len, q_block_len)
 
-    if kernel == "folx":
+    if kernel == 'folx':
         kernel_fn = folx_mhsa_forward_laplacian_kernel
-    elif kernel == "reference":
+    elif kernel == 'reference':
         kernel_fn = reference_mhsa_forward_laplacian_kernel
-    elif kernel == "pallas":
+    elif kernel == 'pallas':
         kernel_fn = pl.pallas_call(
             partial(mhsa_forward_laplacian_kernel, q_block_len=q_block_len),
             grid=create_grid(batch_len, seq_len, num_heads, q_block_len),
             in_specs=[
-                get_value_or_laplacian_block_spec(seq_len, head_len, q_block_len, True),  # q.x
+                get_value_or_laplacian_block_spec(
+                    seq_len, head_len, q_block_len, True
+                ),  # q.x
                 get_jacobian_block_spec(
                     input_len, seq_len, head_len, q_block_len, True
                 ),  # q.jacobian
                 get_value_or_laplacian_block_spec(
                     seq_len, head_len, q_block_len, True
                 ),  # q.laplacian
-                get_value_or_laplacian_block_spec(seq_len, head_len, kv_block_len),  # k.x
-                get_jacobian_block_spec(input_len, seq_len, head_len, kv_block_len),  # k.jacobian
-                get_value_or_laplacian_block_spec(seq_len, head_len, kv_block_len),  # k.laplacian
-                get_value_or_laplacian_block_spec(seq_len, head_len, kv_block_len),  # v.x
-                get_jacobian_block_spec(input_len, seq_len, head_len, kv_block_len),  # v.jacobian
-                get_value_or_laplacian_block_spec(seq_len, head_len, kv_block_len),  # v.laplacian
+                get_value_or_laplacian_block_spec(
+                    seq_len, head_len, kv_block_len
+                ),  # k.x
+                get_jacobian_block_spec(
+                    input_len, seq_len, head_len, kv_block_len
+                ),  # k.jacobian
+                get_value_or_laplacian_block_spec(
+                    seq_len, head_len, kv_block_len
+                ),  # k.laplacian
+                get_value_or_laplacian_block_spec(
+                    seq_len, head_len, kv_block_len
+                ),  # v.x
+                get_jacobian_block_spec(
+                    input_len, seq_len, head_len, kv_block_len
+                ),  # v.jacobian
+                get_value_or_laplacian_block_spec(
+                    seq_len, head_len, kv_block_len
+                ),  # v.laplacian
                 get_mask_block_spec(seq_len, q_block_len),  # mask
                 get_input_mask_block_spec(input_len, q_block_len),  # input_mask
             ],
             out_specs=[
-                get_value_or_laplacian_block_spec(seq_len, head_len, q_block_len, True),  # o.x
+                get_value_or_laplacian_block_spec(
+                    seq_len, head_len, q_block_len, True
+                ),  # o.x
                 get_jacobian_block_spec(
                     input_len, seq_len, head_len, q_block_len, True
                 ),  # o.jacobian
@@ -112,23 +129,33 @@ def mhsa_forward_laplacian(
             ],
             out_shape=[
                 jax.ShapeDtypeStruct(
-                    shape=(batch_len, seq_len, num_heads, head_len), dtype=q.dtype  # o.x
+                    shape=(batch_len, seq_len, num_heads, head_len),
+                    dtype=q.dtype,  # o.x
                 ),
                 jax.ShapeDtypeStruct(
-                    shape=(input_len, batch_len, seq_len, num_heads, head_len),  # o.jacobian
+                    shape=(
+                        input_len,
+                        batch_len,
+                        seq_len,
+                        num_heads,
+                        head_len,
+                    ),  # o.jacobian
                     dtype=q.dtype,
                 ),
                 jax.ShapeDtypeStruct(
-                    shape=(batch_len, seq_len, num_heads, head_len), dtype=q.dtype  # o.laplacian
+                    shape=(batch_len, seq_len, num_heads, head_len),
+                    dtype=q.dtype,  # o.laplacian
                 ),
             ],
-            compiler_params=dict(triton=dict(num_warps=num_warps, num_stages=num_stages)),
+            compiler_params=dict(
+                triton=dict(num_warps=num_warps, num_stages=num_stages)
+            ),
             debug=False,
             interpret=interpret,
-            name="mhsa_forward_laplacian",
+            name='mhsa_forward_laplacian',
         )
     else:
-        raise ValueError(f"Unknown forward Laplacian attention kernel: {kernel}")
+        raise ValueError(f'Unknown forward Laplacian attention kernel: {kernel}')
     # TODO: Can we avoid calling `.dense_array` on the Jacobians and instead use sparse matrices here?
     # This would help with LapNet-like attention
     x, jacobian, laplacian = kernel_fn(
@@ -171,7 +198,9 @@ def folx_mhsa_forward_laplacian_kernel(
     v_fwd_lap = FwdLaplArray(
         v, FwdJacobian.from_dense(v_jac * input_mask[..., None, None, None]), v_lap
     )
-    o_fwd_lap = forward_laplacian(reference_mhsa_kernel)(q_fwd_lap, k_fwd_lap, v_fwd_lap, mask)  # type: ignore
+    o_fwd_lap = forward_laplacian(reference_mhsa_kernel)(
+        q_fwd_lap, k_fwd_lap, v_fwd_lap, mask
+    )  # type: ignore
     return o_fwd_lap.x, o_fwd_lap.jacobian.dense_array, o_fwd_lap.laplacian
 
 
@@ -193,7 +222,9 @@ def reference_mhsa_forward_laplacian_kernel(
     # [batch_size, seq_len, num_heads, seq_len]
     square_mask = mask[:, None, None, :] * mask[:, :, None, None]
     # [input_dim, batch_size, seq_len, num_heads, head_dim]
-    coordinate_and_electron_mask = input_mask[:, :, None, None, None] * mask[None, :, :, None, None]
+    coordinate_and_electron_mask = (
+        input_mask[:, :, None, None, None] * mask[None, :, :, None, None]
+    )
     # [batch_size, seq_len, num_heads, head_dim]
     qkv_mask = mask[:, :, None, None]
     q_jac = jnp.where(coordinate_and_electron_mask, q_jac, 0.0)
@@ -203,31 +234,41 @@ def reference_mhsa_forward_laplacian_kernel(
     k_lap = jnp.where(qkv_mask, k_lap, 0.0)
     v_lap = jnp.where(qkv_mask, v_lap, 0.0)
     # Forward
-    s = jnp.einsum("Bnhd,BNhd->BnhN", q, k)
+    s = jnp.einsum('Bnhd,BNhd->BnhN', q, k)
     s = jnp.where(square_mask, s, -big_number(s.dtype))
     p = jax.nn.softmax(s, axis=-1)
-    o = jnp.einsum("BnhN,BNhd->Bnhd", p, v)
+    o = jnp.einsum('BnhN,BNhd->Bnhd', p, v)
 
     # Jacobian
     delta = jnp.eye(q.shape[1])
-    delta_minus_p = delta[None, None, :, None, :] - jnp.moveaxis(p[:, :, :, :, None], 2, 3)
-    first_term = jnp.einsum("pBihb,Bmhb,Bihk,Bimhk,Bkha->pBiha", q_jac, k, p, delta_minus_p, v)
-    second_term = jnp.einsum("pBmhb,Bihb,Bihk,Bimhk,Bkha->pBiha", k_jac, q, p, delta_minus_p, v)
-    third_term = jnp.einsum("pBjha,Bihj->pBiha", v_jac, p)
+    delta_minus_p = delta[None, None, :, None, :] - jnp.moveaxis(
+        p[:, :, :, :, None], 2, 3
+    )
+    first_term = jnp.einsum(
+        'pBihb,Bmhb,Bihk,Bimhk,Bkha->pBiha', q_jac, k, p, delta_minus_p, v
+    )
+    second_term = jnp.einsum(
+        'pBmhb,Bihb,Bihk,Bimhk,Bkha->pBiha', k_jac, q, p, delta_minus_p, v
+    )
+    third_term = jnp.einsum('pBjha,Bihj->pBiha', v_jac, p)
     o_jac = first_term + second_term + third_term
 
     # Laplacian
     ## J(f)*L(g)
-    o_q = jnp.einsum("Bihb,Bmhb,Bihk,Bimhk,Bkha->Biha", q_lap, k, p, delta_minus_p, v)
-    o_k = jnp.einsum("Bjhb,Bihb,Bihk,Bijhk,Bkha->Biha", k_lap, q, p, delta_minus_p, v)
-    o_v = jnp.einsum("Bjha,Bihj->Biha", v_lap, p)
+    o_q = jnp.einsum('Bihb,Bmhb,Bihk,Bimhk,Bkha->Biha', q_lap, k, p, delta_minus_p, v)
+    o_k = jnp.einsum('Bjhb,Bihb,Bihk,Bijhk,Bkha->Biha', k_lap, q, p, delta_minus_p, v)
+    o_v = jnp.einsum('Bjha,Bihj->Biha', v_lap, p)
 
     ## tr(J(g) H(f) J(g)^T)
     ### P^K
-    o_vqr2 = jnp.einsum("pBihc,pBkhb,Bmhb,Bkhi,Bkmhi->Bkhc", v_jac, q_jac, k, p, delta_minus_p)
-    o_vkr2 = jnp.einsum("pBihc,pBjhb,Bkhb,Bkhi,Bkjhi->Bkhc", v_jac, k_jac, q, p, delta_minus_p)
+    o_vqr2 = jnp.einsum(
+        'pBihc,pBkhb,Bmhb,Bkhi,Bkmhi->Bkhc', v_jac, q_jac, k, p, delta_minus_p
+    )
+    o_vkr2 = jnp.einsum(
+        'pBihc,pBjhb,Bkhb,Bkhi,Bkjhi->Bkhc', v_jac, k_jac, q, p, delta_minus_p
+    )
     o_qqr2 = jnp.einsum(
-        "pBkha,pBkhb,Bmhb,Bnha,Bkhl,Bknhl,Bkmhl,Blhc->Bkhc",
+        'pBkha,pBkhb,Bmhb,Bnha,Bkhl,Bknhl,Bkmhl,Blhc->Bkhc',
         q_jac,
         q_jac,
         k,
@@ -237,7 +278,7 @@ def reference_mhsa_forward_laplacian_kernel(
         delta_minus_p,
         v,
     ) - jnp.einsum(
-        "pBkha,pBkhb,Bmhb,Bkhl,Bnha,Bkhm,Bknhm,Blhc->Bkhc",
+        'pBkha,pBkhb,Bmhb,Bkhl,Bnha,Bkhm,Bknhm,Blhc->Bkhc',
         q_jac,
         q_jac,
         k,
@@ -248,9 +289,11 @@ def reference_mhsa_forward_laplacian_kernel(
         v,
     )
     o_qkr2 = (
-        jnp.einsum("pBkha,pBjha,Bkhl,Bkjhl,Blhc->Bkhc", q_jac, k_jac, p, delta_minus_p, v)
+        jnp.einsum(
+            'pBkha,pBjha,Bkhl,Bkjhl,Blhc->Bkhc', q_jac, k_jac, p, delta_minus_p, v
+        )
         + jnp.einsum(
-            "pBkha,pBjhb,Bkhb,Bmha,Bkhl,Bkmhl,Bkjhl,Blhc->Bkhc",
+            'pBkha,pBjhb,Bkhb,Bmha,Bkhl,Bkmhl,Bkjhl,Blhc->Bkhc',
             q_jac,
             k_jac,
             q,
@@ -261,7 +304,7 @@ def reference_mhsa_forward_laplacian_kernel(
             v,
         )
         - jnp.einsum(
-            "pBkha,pBjhb,Bkhb,Bkhl,Bmha,Bkhj,Bkmhj,Blhc->Bkhc",
+            'pBkha,pBjhb,Bkhb,Bkhl,Bmha,Bkhj,Bkmhj,Blhc->Bkhc',
             q_jac,
             k_jac,
             q,
@@ -273,7 +316,7 @@ def reference_mhsa_forward_laplacian_kernel(
         )
     )
     o_kkr2 = jnp.einsum(
-        "pBiha,Bkhb,Bkha,Bkhl,Bkihl,Bkjhl,Blhc,pBjhb->Bkhc",
+        'pBiha,Bkhb,Bkha,Bkhl,Bkihl,Bkjhl,Blhc,pBjhb->Bkhc',
         k_jac,
         q,
         q,
@@ -283,7 +326,7 @@ def reference_mhsa_forward_laplacian_kernel(
         v,
         k_jac,
     ) - jnp.einsum(
-        "pBiha,Bkhb,Bkhl,Bkha,Bkhj,Bkihj,Blhc,pBjhb->Bkhc",
+        'pBiha,Bkhb,Bkhl,Bkha,Bkhj,Bkihj,Blhc,pBjhb->Bkhc',
         k_jac,
         q,
         p,
@@ -362,7 +405,9 @@ def mhsa_forward_laplacian_kernel(
     q_kr2 = pl.dot(q, k_lap, trans_b=True)
     q_kr2_p = q_kr2 * p
     o_lap = pl.dot(qr2_k_p + q_kr2_p, v)  # QR^2 OQ first term and KR^2 OK first term
-    o_lap -= sum_columns(qr2_k_p + q_kr2_p) * o  # QR^2 OQ second term and KR^2 OK second term
+    o_lap -= (
+        sum_columns(qr2_k_p + q_kr2_p) * o
+    )  # QR^2 OQ second term and KR^2 OK second term
     o_lap += pl.dot(p, v_lap)  ## VR^2 OV
 
     def body_of_loop_over_elec_coords(p_idx, o_lap):
@@ -430,6 +475,8 @@ def mhsa_forward_laplacian_kernel(
 
         return o_lap + input_mask * o_lap_out
 
-    o_lap = jax.lax.fori_loop(0, o_jac_ref.shape[0], body_of_loop_over_elec_coords, o_lap)
+    o_lap = jax.lax.fori_loop(
+        0, o_jac_ref.shape[0], body_of_loop_over_elec_coords, o_lap
+    )
 
     o_lap_ref[:, :] = o_lap

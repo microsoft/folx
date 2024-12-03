@@ -20,7 +20,7 @@ def mhsa(
     v: jax.Array,
     mask: jax.Array,
     input_mask: jax.Array,
-    kernel: Literal["pallas", "reference"] = "pallas",
+    kernel: Literal['pallas', 'reference'] = 'pallas',
     interpret: bool = False,
     q_block_len: int | None = None,
     num_warps: int = 2,
@@ -43,7 +43,7 @@ def mhsa(
     batch_len, seq_len, num_heads, head_len = q.shape
     q_block_len, kv_block_len = compute_q_and_kv_block_len(seq_len, q_block_len)
 
-    if kernel == "pallas":
+    if kernel == 'pallas':
         kernel_fn = pl.pallas_call(
             partial(mhsa_kernel, q_block_len=q_block_len),
             grid=create_grid(batch_len, seq_len, num_heads, q_block_len),
@@ -57,15 +57,16 @@ def mhsa(
             out_shape=jax.ShapeDtypeStruct(
                 shape=(batch_len, seq_len, num_heads, head_len), dtype=q.dtype
             ),
-            compiler_params=dict(triton=dict(num_warps=num_warps, num_stages=num_stages)),
+            compiler_params=dict(
+                triton=dict(num_warps=num_warps, num_stages=num_stages)
+            ),
             debug=False,
             interpret=interpret,
-            name="mhsa",
+            name='mhsa',
         )
-    elif kernel == "reference":
         kernel_fn = reference_mhsa_kernel
     else:
-        raise ValueError(f"Unknown multi-head attention kernel: {kernel}")
+        raise ValueError(f'Unknown multi-head attention kernel: {kernel}')
     o = kernel_fn(q, k, v, mask)
     return o
 
@@ -81,10 +82,10 @@ def reference_mhsa_kernel(
     del interpret  # Only used with the pallas kernel
     # [batch_len, seq_len, num_heads, seq_len]
     square_mask = mask[:, None, None, :] * mask[:, :, None, None]
-    s = jnp.einsum("Biha,Bjha->Bihj", q, k)
+    s = jnp.einsum('Biha,Bjha->Bihj', q, k)
     s = jnp.where(square_mask, s, -big_number(s.dtype))
     p = jax.nn.softmax(s, axis=-1)
-    o = jnp.einsum("Bihj,Bjha->Biha", p, v)
+    o = jnp.einsum('Bihj,Bjha->Biha', p, v)
     return o
 
 
