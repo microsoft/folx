@@ -85,7 +85,8 @@ requires-dist = [
     { name = "jax", marker = "python_full_version < '3.13'", specifier = ">=0.4.30" },
     { name = "jax", marker = "python_full_version >= '3.13'", specifier = ">=0.4.34" },
     { name = "jaxtyping", specifier = ">=0.2.36" },
-    { name = "numpy", specifier = ">=1.25" },
+    { name = "numpy", marker = "python_full_version < '3.13'", specifier = ">=1.25" },
+    { name = "numpy", marker = "python_full_version >= '3.13'", specifier = ">=2.1" },
 ]
 
 [package.metadata.requires-dev]

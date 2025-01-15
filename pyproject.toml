@@ -29,7 +29,8 @@ dependencies = [
     "jax>=0.4.30; python_version < '3.13'",
     "jax>=0.4.34; python_version >= '3.13'",
     "jaxtyping>=0.2.36",
-    "numpy>=1.25",
+    "numpy>=1.25; python_version < '3.13'",
+    "numpy>=2.1; python_version >= '3.13'",
 ]
 
 [project.urls]
