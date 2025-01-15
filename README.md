@@ -4,17 +4,16 @@ This submodule implements the forward laplacian from https://arxiv.org/abs/2307.
 
 ## Install
 
-Either clone repo and install locally via
+Install `folx` with your package manager of choice
 ```bash
-poetry install
+pip install folx # if you use pip
+uv add folx # if you use uv
 ```
-or
+If you want to develop `folx`, please use [`uv`](https://docs.astral.sh/uv/):
 ```bash
-pip install .
-```
-or install via `pip` package manager via
-```bash
-pip install folx
+https://github.com/microsoft/folx.git
+cd folx
+uv sync
 ```
 
 ## Example
