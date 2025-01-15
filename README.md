@@ -11,7 +11,7 @@ uv add folx # if you use uv
 ```
 If you want to develop `folx`, please use [`uv`](https://docs.astral.sh/uv/):
 ```bash
-https://github.com/microsoft/folx.git
+git clone https://github.com/microsoft/folx.git
 cd folx
 uv sync
 ```
