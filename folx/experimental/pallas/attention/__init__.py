@@ -2,6 +2,7 @@ from functools import partial
 from typing import Literal
 
 import jax
+
 from folx import register_function
 
 from .custom_gradients import mhsa_backward, mhsa_forward
@@ -20,7 +21,7 @@ def multi_head_self_attention(
     # TODO: support multiple masks for cross-attention
     mask: jax.Array,
     input_mask: jax.Array,
-    kernel: Literal["pallas", "reference"] = "pallas",
+    kernel: Literal['pallas', 'reference'] = 'pallas',
     interpret: bool = False,
     q_block_len: int | None = None,
     num_warps: int = 2,
@@ -68,7 +69,7 @@ def multi_head_self_attention(
     )
 
 
-register_function("multi_head_self_attention", mhsa_forward_laplacian)
+register_function('multi_head_self_attention', mhsa_forward_laplacian)
 
 
-__all__ = ["multi_head_self_attention"]
+__all__ = ['multi_head_self_attention']

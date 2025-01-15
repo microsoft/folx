@@ -30,7 +30,8 @@ def get_value_or_laplacian_block_spec(
     """
     if seq_block_len is None:
         return pl.BlockSpec(
-            index_map=lambda i, j: (i, 0, j, 0), block_shape=(None, seq_len, None, head_len)
+            index_map=lambda i, j: (i, 0, j, 0),
+            block_shape=(None, seq_len, None, head_len),
         )
     elif is_q_like:
         return pl.BlockSpec(
@@ -112,8 +113,12 @@ def get_input_mask_block_spec(input_len: int, seq_block_len: Optional[int] = Non
             of dimensions of the grid. Defaults to ``None``.
     """
     if seq_block_len is None:
-        return pl.BlockSpec(index_map=lambda i, _j: (0, i), block_shape=(input_len, None))
-    return pl.BlockSpec(index_map=lambda i, _j, _k: (0, i), block_shape=(input_len, None))
+        return pl.BlockSpec(
+            index_map=lambda i, _j: (0, i), block_shape=(input_len, None)
+        )
+    return pl.BlockSpec(
+        index_map=lambda i, _j, _k: (0, i), block_shape=(input_len, None)
+    )
 
 
 def create_grid(
@@ -172,4 +177,4 @@ def big_number(dtype):
     elif dtype == jnp.float64:
         return jnp.asarray(1e40, dtype=dtype)
     else:
-        raise ValueError(f"Unexpected dtype {dtype}")
+        raise ValueError(f'Unexpected dtype {dtype}')

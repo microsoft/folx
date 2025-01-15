@@ -91,9 +91,9 @@ def eval_jaxpr_with_forward_laplacian(
             invals[n_const + n_carry :],
         )
         carry_merge = extract_jacobian_mask(in_carry)
-        assert all(
-            isinstance(x, Array) for x in in_inp
-        ), 'Scan does not support scanning over input depenedent tensors.\nPlease unroll the loop.'
+        assert all(isinstance(x, Array) for x in in_inp), (
+            'Scan does not support scanning over input depenedent tensors.\nPlease unroll the loop.'
+        )
 
         def wrapped(carry, x):
             result = eval_jaxpr_with_forward_laplacian(

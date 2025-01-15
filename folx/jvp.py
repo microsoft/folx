@@ -98,7 +98,7 @@ def sparse_sum_jvp(
     vmapped_axes = tuple(i for i in range(idx.ndim) if i not in repeated_dims and i > 0)
     new_order = (0, *vmapped_axes, *repeated_dims)
     inv_order = np.argsort(new_order)
-    idx = np.transpose(idx, new_order)[..., *(0,) * len(repeated_dims)]
+    idx = np.transpose(idx, new_order)[(..., *(0,) * len(repeated_dims))]
     jac = jnp.transpose(jac, new_order)
     jac_in_shape = jac.shape
     idx = idx.reshape(idx.shape[0], -1)

@@ -141,9 +141,9 @@ def broadcast_shapes_to_args(
             inp = tuple(range(x.ndim))
         n_dim = x.ndim
         inp = tuple(i if i >= 0 else i + n_dim for i in inp)
-        assert (
-            max(*inp, -1, -1) < n_dim
-        ), f'axes {inp} out of bounds for array of shape {x.shape}'
+        assert max(*inp, -1, -1) < n_dim, (
+            f'axes {inp} out of bounds for array of shape {x.shape}'
+        )
         return inp
 
     flat_axes, tree_def = jtu.tree_flatten(axes, is_leaf=is_axes_def)
