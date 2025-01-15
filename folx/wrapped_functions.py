@@ -496,3 +496,10 @@ def get_laplacian(
         else:
             raise TypeError(f"Can't wrap {primitive_or_name} based on function names.")
     return None
+
+
+# Only supported in newer JAX versions
+if hasattr(jax.lax, 'square_p'):
+    register_function(
+        jax.lax.square_p, wrap_forward_laplacian(jax.lax.square, in_axes=())
+    )
