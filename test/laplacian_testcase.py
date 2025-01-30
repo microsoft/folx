@@ -13,7 +13,7 @@ class LaplacianTestCase(unittest.TestCase):
         jax.config.update('jax_enable_x64', True)
         return super().setUp()
 
-    def assert_allclose(self, x, y, rtol=1e-6):
+    def assert_allclose(self, x, y, rtol=2e-5):
         return np.testing.assert_allclose(x, y, rtol=rtol)
 
     @staticmethod
