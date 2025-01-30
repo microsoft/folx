@@ -503,3 +503,12 @@ if hasattr(jax.lax, 'square_p'):
     register_function(
         jax.lax.square_p, wrap_forward_laplacian(jax.lax.square, in_axes=())
     )
+if hasattr(jax.lax, 'split_p'):
+    register_function(
+        jax.lax.split_p,
+        wrap_forward_laplacian(
+            jax.lax.split,
+            flags=FunctionFlags.INDEXING,
+            index_static_args=(1, 2),
+        ),
+    )

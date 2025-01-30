@@ -325,7 +325,7 @@ def sparse_index_jvp(
     grad_y = tree_take(y_tangent, slice(None, -1), axis=JAC_DIM)
     lapl_y = tree_take(y_tangent, -1, axis=JAC_DIM)
 
-    assert grad_y.shape == mask.shape
+    assert jtu.tree_all(jtu.tree_map(lambda a, b: a.shape == b.shape, grad_y, mask))
     grad_y = jtu.tree_map(FwdJacobian, grad_y, mask)
     return y, grad_y, lapl_y
 

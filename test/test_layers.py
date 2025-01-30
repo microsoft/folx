@@ -260,3 +260,14 @@ class TestForwardLaplacian(LaplacianTestCase):
             with self.subTest(dtype=dtype):
                 y = jax.jit(forward_laplacian(functools.partial(f, dtype=dtype)))(x)
                 self.assertIsInstance(y, jax.Array)
+
+    def test_split(self):
+        x = jax.random.normal(jax.random.PRNGKey(0), (16,))
+
+        def f(x):
+            return jnp.split(x, 2)
+
+        # Check that the output is still sparse
+        y_fwd = forward_laplacian(f, sparsity_threshold=1)(x)
+        assert y_fwd[0].jacobian.data.shape == (1, 8)
+        assert y_fwd[1].jacobian.data.shape == (1, 8)

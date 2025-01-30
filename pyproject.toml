@@ -52,6 +52,8 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    "flax>=0.10.2",
+    "jax[cuda12]>=0.4.38",
     "parameterized>=0.9.0",
     "pre-commit-uv>=4.1.4",
     "pytest>=8.3.4",
@@ -66,3 +68,6 @@ addopts = "-n auto"
 JAX_PLATFORMS = "cpu"
 JAX_ENABLE_X64 = "True"
 XLA_FLAGS = "--xla_force_host_platform_device_count=4"
+
+[tool.uv.sources]
+folx = { workspace = true }
