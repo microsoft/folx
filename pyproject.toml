@@ -62,7 +62,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "-n auto"
+addopts = "-n auto --dist=worksteal --durations=0 --color=yes -v"
 
 [tool.pytest_env]
 JAX_PLATFORMS = "cpu"
