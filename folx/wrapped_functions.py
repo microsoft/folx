@@ -358,18 +358,20 @@ _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
     jax.lax.sin_p: wrap_forward_laplacian(jax.lax.sin, in_axes=()),
     jax.lax.tan_p: wrap_forward_laplacian(jax.lax.tan, in_axes=()),
     jax.lax.broadcast_in_dim_p: wrap_forward_laplacian(
-        jax.lax.broadcast_in_dim, flags=FunctionFlags.INDEXING
+        jax.lax.broadcast_in_dim_p.bind,
+        flags=FunctionFlags.INDEXING,
+        name='broadcast_in_dim',
     ),
     jax.lax.reshape_p: wrap_forward_laplacian(
-        jax.lax.reshape, flags=FunctionFlags.INDEXING
+        jax.lax.reshape_p.bind, flags=FunctionFlags.INDEXING, name='reshape'
     ),
     jax.lax.slice_p: wrap_forward_laplacian(
-        jax.lax.slice, flags=FunctionFlags.INDEXING
+        jax.lax.slice_p.bind, flags=FunctionFlags.INDEXING, name='slice'
     ),
     jax.lax.dynamic_slice_p: wrap_forward_laplacian(
         jax.lax.dynamic_slice_p.bind,
         flags=FunctionFlags.INDEXING,
-        name='slice',
+        name='dynamic_slice',
         index_static_args=slice(1, None),
     ),
     jax.lax.concatenate_p: wrap_forward_laplacian(
@@ -385,12 +387,14 @@ _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
         jax.lax.gather_p.bind, flags=FunctionFlags.INDEXING, name='gather'
     ),
     jax.lax.transpose_p: wrap_forward_laplacian(
-        jax.lax.transpose, flags=FunctionFlags.INDEXING
+        jax.lax.transpose_p.bind, flags=FunctionFlags.INDEXING, name='transpose'
     ),
     jax.lax.squeeze_p: wrap_forward_laplacian(
-        jax.lax.squeeze, flags=FunctionFlags.INDEXING
+        jax.lax.squeeze_p.bind, flags=FunctionFlags.INDEXING, name='squeeze'
     ),
-    jax.lax.rev_p: wrap_forward_laplacian(jax.lax.rev, flags=FunctionFlags.INDEXING),
+    jax.lax.rev_p: wrap_forward_laplacian(
+        jax.lax.rev_p.bind, flags=FunctionFlags.INDEXING, name='rev'
+    ),
     jax.lax.max_p: wrap_forward_laplacian(
         jax.lax.max, in_axes=(), flags=FunctionFlags.LINEAR
     ),
