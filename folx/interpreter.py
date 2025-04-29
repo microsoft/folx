@@ -1,16 +1,32 @@
 import functools
 import logging
+import warnings
 from collections import defaultdict
-from typing import Callable, ParamSpec, Sequence, TypeVar
+from typing import TYPE_CHECKING, Callable, ParamSpec, Sequence, TypeVar
 
 import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
-from jax import core
-from jax._src.source_info_util import summarize
+from jax.core import Atom, Tracer
 from jax.typing import ArrayLike
-from jax.util import safe_map
+
+if TYPE_CHECKING:
+    from jax.extend.core import ClosedJaxpr, Jaxpr, JaxprEqn, Literal, Var
+    from jax.extend.source_info_util import summarize
+else:
+    try:
+        from jax.extend.core import ClosedJaxpr, Jaxpr, JaxprEqn, Literal, Var
+        from jax.extend.source_info_util import summarize
+    except ImportError:
+        from jax._src.source_info_util import summarize  # type: ignore[import-error]
+        from jax.core import (  # type: ignore[import-error]
+            ClosedJaxpr,
+            Jaxpr,
+            JaxprEqn,
+            Literal,
+            Var,
+        )
 
 from .api import (
     IS_LEAF,
@@ -31,33 +47,33 @@ P = ParamSpec('P')
 class JaxExprEnvironment:
     # A simple environment that keeps track of the variables
     # and frees them once they are no longer needed.
-    env: dict[core.Var, ArrayOrFwdLaplArray]
-    reference_counter: dict[core.Var, int]
+    env: dict[Var, ArrayOrFwdLaplArray]
+    reference_counter: dict[Var, int]
 
     def __init__(
-        self, jaxpr: core.Jaxpr, consts: Sequence[Array], *args: ArrayOrFwdLaplArray
+        self, jaxpr: Jaxpr, consts: Sequence[Array], *args: ArrayOrFwdLaplArray
     ):
         self.env = {}
         self.reference_counter = defaultdict(int)
         for v in jaxpr.invars + jaxpr.constvars:
-            if isinstance(v, core.Literal):
+            if isinstance(v, Literal):
                 continue
             self.reference_counter[v] += 1
-        eqn: core.JaxprEqn
+        eqn: JaxprEqn
         for eqn in jaxpr.eqns:
             for v in eqn.invars:
-                if isinstance(v, core.Literal):
+                if isinstance(v, Literal):
                     continue
                 self.reference_counter[v] += 1
         for v in jaxpr.outvars:
-            if isinstance(v, core.Literal):
+            if isinstance(v, Literal):
                 continue
             self.reference_counter[v] = np.iinfo(np.int32).max
         self.write_many(jaxpr.constvars, consts)
         self.write_many(jaxpr.invars, args)
 
-    def read(self, var: core.Atom) -> ArrayOrFwdLaplArray:
-        if isinstance(var, core.Literal):
+    def read(self, var: Atom) -> ArrayOrFwdLaplArray:
+        if isinstance(var, Literal):
             return var.val
         self.reference_counter[var] -= 1
         result = self.env[var]
@@ -66,24 +82,24 @@ class JaxExprEnvironment:
             del self.reference_counter[var]
         return result
 
-    def write(self, var: core.Var, val: ArrayOrFwdLaplArray):
+    def write(self, var: Var, val: ArrayOrFwdLaplArray):
         if self.reference_counter[var] > 0:
             self.env[var] = val
 
-    def read_many(self, vars: Sequence[core.Atom]) -> list[ArrayOrFwdLaplArray]:
-        return safe_map(self.read, vars)
+    def read_many(self, vars: Sequence[Atom]) -> list[ArrayOrFwdLaplArray]:
+        return list(map(self.read, vars))
 
-    def write_many(self, vars: Sequence[core.Var], vals: Sequence[ArrayOrFwdLaplArray]):
-        return safe_map(self.write, vars, vals)
+    def write_many(self, vars: Sequence[Var], vals: Sequence[ArrayOrFwdLaplArray]):
+        return list(map(self.write, vars, vals))
 
 
 def eval_jaxpr_with_forward_laplacian(
-    jaxpr: core.Jaxpr, consts, *args, sparsity_threshold: int
+    jaxpr: Jaxpr, consts, *args, sparsity_threshold: int
 ):
     enable_sparsity = sparsity_threshold > 0
     env = JaxExprEnvironment(jaxpr, consts, *args)
 
-    def eval_scan(eqn: core.JaxprEqn, invals):
+    def eval_scan(eqn: JaxprEqn, invals):
         n_carry, n_const = eqn.params['num_carry'], eqn.params['num_consts']
         in_const, in_carry, in_inp = (
             invals[:n_const],
@@ -136,7 +152,7 @@ def eval_jaxpr_with_forward_laplacian(
         ]
         return *carry, *y
 
-    def eval_pjit(eqn: core.JaxprEqn, invals):
+    def eval_pjit(eqn: JaxprEqn, invals):
         name = eqn.params['name']
         if fn := get_laplacian(name):
             # TODO: this is a bit incomplete, e.g., kwargs?
@@ -144,7 +160,7 @@ def eval_jaxpr_with_forward_laplacian(
             if isinstance(outvals, (FwdLaplArray, Array)):
                 outvals = [outvals]  # TODO: Figure out how to properly handle outvals
             return outvals
-        sub_expr: core.ClosedJaxpr = eqn.params['jaxpr']
+        sub_expr: ClosedJaxpr = eqn.params['jaxpr']
         return eval_jaxpr_with_forward_laplacian(
             sub_expr.jaxpr,
             sub_expr.literals,
@@ -152,7 +168,7 @@ def eval_jaxpr_with_forward_laplacian(
             sparsity_threshold=sparsity_threshold,
         )
 
-    def eval_custom_jvp(eqn: core.JaxprEqn, invals):
+    def eval_custom_jvp(eqn: JaxprEqn, invals):
         subfuns, args = eqn.primitive.get_bind_params(eqn.params)
         fn = functools.partial(eqn.primitive.bind, *subfuns, **args)
         with LoggingPrefix(f'({summarize(eqn.source_info)})'):
@@ -160,7 +176,7 @@ def eval_jaxpr_with_forward_laplacian(
                 invals, {}, sparsity_threshold=sparsity_threshold
             )
 
-    def eval_laplacian(eqn: core.JaxprEqn, invals):
+    def eval_laplacian(eqn: JaxprEqn, invals):
         subfuns, params = eqn.primitive.get_bind_params(eqn.params)
         with LoggingPrefix(f'({summarize(eqn.source_info)})'):
             fn = get_laplacian(eqn.primitive, True)
@@ -179,10 +195,7 @@ def eval_jaxpr_with_forward_laplacian(
                 # omnistaging. While this could cost us some memory and speed,
                 # it gives us access to more variables during tracing.
                 # https://github.com/google/jax/pull/3370
-                if (
-                    all(not isinstance(x, core.Tracer) for x in invals)
-                    and enable_sparsity
-                ):
+                if all(not isinstance(x, Tracer) for x in invals) and enable_sparsity:
                     try:
                         with jax.ensure_compile_time_eval():
                             outvals = eqn.primitive.bind(
@@ -190,11 +203,12 @@ def eval_jaxpr_with_forward_laplacian(
                             )
                     except Exception as e:
                         with LoggingPrefix(f'({summarize(eqn.source_info)})'):
-                            logging.warning(
+                            warnings.warn(
                                 f'Could not perform operation {eqn.primitive.name} in eager execution despite it only depending on non-input dependent values. '
                                 'We switch to tracing rather than eager execution. This may impact sparsity propagation.\n'
                                 f'{e}'
                             )
+                            exit()
                         outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
                 else:
                     outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
@@ -302,6 +316,6 @@ def forward_laplacian(
         return out_structure.unflatten(out)
 
     if disable_jit:
-        return wrapped
+        return wrapped  # type: ignore
 
     return jax.jit(wrapped)  # type: ignore

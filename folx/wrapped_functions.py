@@ -6,7 +6,11 @@ import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
-from jax.core import Primitive
+
+try:
+    from jax.extend.core import Primitive
+except ImportError:
+    from jax.core import Primitive  # type: ignore[import-error]
 
 from folx.ad import is_tree_complex
 
