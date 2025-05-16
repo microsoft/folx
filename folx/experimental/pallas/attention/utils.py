@@ -167,14 +167,14 @@ def compute_q_and_kv_block_len(
     return q_block_len, kv_block_len
 
 
-def big_number(dtype):
+def big_number(dtype) -> float:
     if dtype == jnp.float16:
-        return jnp.asarray(1e10, dtype=dtype)
+        return 1e10
     elif dtype == jnp.bfloat16:
-        return jnp.asarray(1e20, dtype=dtype)
+        return 1e20
     elif dtype == jnp.float32:
-        return jnp.asarray(1e20, dtype=dtype)
+        return 1e20
     elif dtype == jnp.float64:
-        return jnp.asarray(1e40, dtype=dtype)
+        return 1e40
     else:
         raise ValueError(f'Unexpected dtype {dtype}')
