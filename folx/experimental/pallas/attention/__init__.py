@@ -51,7 +51,8 @@ def multi_head_self_attention(
             ``n_elec < 16``), this should still retain the original ``3 * n_elec``
             length.
         bias: Edge bias of shape ``(batch_size, sequence_length, num_heads, sequence_length)``
-        kernel (str): Default ``pallas``. The kernel to use.
+            This argument is option, pass ``None`` to use no edge bias.
+        kernel: Default ``pallas``. The kernel to use.
             - folx: the vanilla folx kernel is used.
             - reference: the reference jax kernel is used.
             - pallas: the pallas kernel is used.
@@ -60,9 +61,9 @@ def multi_head_self_attention(
         q_block_len (int | None): If ``None``, there is no blocking of the query
           array, otherwise it's blocked into blocks of length ``q_block_len``.
           Default is ``None``.
-        num_warps (int): The number of threads to execute a single instance of the
+        num_warps: The number of threads to execute a single instance of the
           kernel with. Default is 2.
-        num_stages (int): The number of stages. Default is 2.
+        num_stages: The number of stages. Default is 2.
     """
     if bias is None:
         return custom_vjp_mhsa_jitted(
