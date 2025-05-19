@@ -1,10 +1,8 @@
-from functools import partial
 from typing import Literal
 
 import jax
 
-from folx import register_function
-
+from ....wrapped_functions import register_function
 from .custom_gradients import mhsa_backward, mhsa_forward, mhsea_backward, mhsea_forward
 from .forward_laplacian import mhsa_forward_laplacian, mhsea_forward_laplacian
 from .mhsa import mhsa
@@ -17,7 +15,7 @@ register_function('custom_vjp_mhsa_jitted', mhsa_forward_laplacian)
 
 custom_vjp_mhsea = jax.custom_vjp(mhsea, nondiff_argnums=(6, 7, 8, 9, 10))
 custom_vjp_mhsea.defvjp(mhsea_forward, mhsea_backward)
-custom_vjp_mhsea_jitted = jax.jit(custom_vjp_mhsa, static_argnums=(6, 7, 8, 9, 10))
+custom_vjp_mhsea_jitted = jax.jit(custom_vjp_mhsea, static_argnums=(6, 7, 8, 9, 10))
 register_function('custom_vjp_mhsea_jitted', mhsea_forward_laplacian)
 
 
@@ -29,6 +27,7 @@ def multi_head_self_attention(
     mask: jax.Array,
     input_mask: jax.Array,
     bias: jax.Array | None = None,
+    *,
     kernel: Literal['pallas', 'reference'] = 'pallas',
     interpret: bool = False,
     q_block_len: int | None = None,

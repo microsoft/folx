@@ -647,6 +647,7 @@ def reference_mhsea_forward_laplacian_kernel(
     v = jnp.where(qkv_mask, v, 0.0)
     q_jac = jnp.where(coordinate_and_electron_mask, q_jac, 0.0)
     k_jac = jnp.where(coordinate_and_electron_mask, k_jac, 0.0)
+    e_jac = jnp.where(input_mask[:, :, None, None, None], e_jac, 0.0)
     v_jac = jnp.where(coordinate_and_electron_mask, v_jac, 0.0)
     q_lap = jnp.where(qkv_mask, q_lap, 0.0)
     k_lap = jnp.where(qkv_mask, k_lap, 0.0)
