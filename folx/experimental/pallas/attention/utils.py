@@ -121,6 +121,38 @@ def get_input_mask_block_spec(input_len: int, seq_block_len: Optional[int] = Non
     )
 
 
+def get_lse_block_spec(
+    seq_len: int,
+    seq_block_len: Optional[int] = None,
+    is_q_blocking: bool = True,
+) -> pl.BlockSpec:
+    r"""Return block specification for the auxuliary logsumexp output of the MHSEA kernel.
+
+    This array is of shape ``(batch_len, seq_len, num_heads)``.
+
+    Args:
+        seq_len (int): The sequence length.
+        head_len (int): The head length.
+        seq_block_len (int, optional): If ``None``, there is no blocking of the sequence
+            dimension. Otherwise, the sequence dimension is blocked into blocks of length
+            ``seq_block_len``. Defaults to ``None``.
+        is_q_blocking (bool, optional): Whether the grid indexing should vary over the
+            sequence axis (like q) or not (like v)
+    """
+    if seq_block_len is None:
+        return pl.BlockSpec(
+            index_map=lambda i, j: (i, 0, j), block_shape=(None, seq_len, None)
+        )
+    elif is_q_blocking:
+        return pl.BlockSpec(
+            index_map=lambda i, j, k: (i, j, k), block_shape=(None, seq_block_len, None)
+        )
+    else:
+        return pl.BlockSpec(
+            index_map=lambda i, _j, k: (i, _j, k), block_shape=(None, seq_len, None)
+        )
+
+
 def create_grid(
     batch_len: int, seq_len: int, num_heads: int, q_block_len: int | None
 ) -> Tuple[int, int] | Tuple[int, int, int]:
