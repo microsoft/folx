@@ -19,4 +19,4 @@ jobs:
           version: "0.5.18"
           enable-cache: true
       - name: Test
-        run: uv run -p ${{ matrix.python-version }} --resolution ${{ matrix.resolution }} pytest
+        run: uv run -p ${{ matrix.python-version }} --resolution ${{ matrix.resolution }} -U pytest
