@@ -6,7 +6,6 @@ import jax
 import jax.flatten_util as jfu
 import jax.numpy as jnp
 import jax.tree_util as jtu
-import jaxlib.xla_extension
 import numpy as np
 
 from .ad import hessian, jacrev
@@ -230,7 +229,7 @@ def find_out_idx(lapl_args: FwdLaplArgs, in_axes, flags: FunctionFlags, threshol
             # potentially fails if the arrays are too large.
             # +1 because we need to accomodate the -1.
             arrs = np.asarray(idx_fn(inp), dtype=int)
-        except jaxlib.xla_extension.XlaRuntimeError:
+        except RuntimeError:
             logging.info(
                 'Failed to find unique elements on GPU, falling back to CPU. This will be slow.'
             )
