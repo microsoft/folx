@@ -5,6 +5,7 @@ from typing import Literal, Tuple
 import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
+from jax.experimental.pallas import gpu as plgpu
 
 from .mhsa import mhsa_kernel, reference_mhsa_kernel
 from .mhsea import mhsea_kernel, reference_mhsea_kernel
@@ -53,8 +54,8 @@ def mhsa_forward(
             out_shape=jax.ShapeDtypeStruct(
                 shape=(batch_len, seq_len, num_heads, head_len), dtype=q.dtype
             ),
-            compiler_params=dict(
-                triton=dict(num_warps=num_warps, num_stages=num_stages)
+            compiler_params=plgpu.TritonCompilerParams(
+                num_warps=num_warps, num_stages=num_stages
             ),
             debug=False,
             interpret=interpret,
@@ -113,8 +114,8 @@ def mhsa_backward(
                     shape=(batch_len, seq_len, num_heads, head_len), dtype=q.dtype
                 ),
             ],
-            compiler_params=dict(
-                triton=dict(num_warps=num_warps, num_stages=num_stages)
+            compiler_params=plgpu.TritonCompilerParams(
+                num_warps=num_warps, num_stages=num_stages
             ),
             debug=False,
             interpret=interpret,
@@ -268,8 +269,8 @@ def mhsea_forward(
                     shape=(batch_len, seq_len, num_heads), dtype=v.dtype
                 ),
             ],
-            compiler_params=dict(
-                triton=dict(num_warps=num_warps, num_stages=num_stages)
+            compiler_params=plgpu.TritonCompilerParams(
+                num_warps=num_warps, num_stages=num_stages
             ),
             debug=False,
             interpret=interpret,
@@ -372,8 +373,8 @@ def mhsea_backward(
                     shape=(batch_len, seq_len, num_heads, seq_len), dtype=e.dtype
                 ),
             ],
-            compiler_params=dict(
-                triton=dict(num_warps=num_warps, num_stages=num_stages)
+            compiler_params=plgpu.TritonCompilerParams(
+                num_warps=num_warps, num_stages=num_stages
             ),
             debug=False,
             interpret=interpret,
@@ -433,8 +434,8 @@ def mhsea_backward(
                     shape=(batch_len, seq_len, num_heads, head_len), dtype=v.dtype
                 ),
             ],
-            compiler_params=dict(
-                triton=dict(num_warps=num_warps, num_stages=num_stages)
+            compiler_params=plgpu.TritonCompilerParams(
+                num_warps=num_warps, num_stages=num_stages
             ),
             debug=False,
             interpret=interpret,

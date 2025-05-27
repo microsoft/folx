@@ -5,6 +5,7 @@ from typing import Any, Dict, Tuple
 import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
+from jax.experimental.pallas import gpu as plgpu
 
 from folx import forward_laplacian
 from folx.api import FwdJacobian, FwdLaplArray
@@ -153,8 +154,8 @@ def mhsa_forward_laplacian(
                     dtype=q.dtype,  # o.laplacian
                 ),
             ],
-            compiler_params=dict(
-                triton=dict(num_warps=num_warps, num_stages=num_stages)
+            compiler_params=plgpu.TritonCompilerParams(
+                num_warps=num_warps, num_stages=num_stages
             ),
             debug=False,
             interpret=interpret,
@@ -588,8 +589,8 @@ def mhsea_forward_laplacian(
                     dtype=v.dtype,  # o.laplacian
                 ),
             ],
-            compiler_params=dict(
-                triton=dict(num_warps=num_warps, num_stages=num_stages)
+            compiler_params=plgpu.TritonCompilerParams(
+                num_warps=num_warps, num_stages=num_stages
             ),
             debug=False,
             interpret=interpret,
