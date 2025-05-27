@@ -5,7 +5,11 @@ from typing import Literal
 import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
-from jax.experimental.pallas import gpu as plgpu
+
+try:
+    from jax.experimental.pallas import triton as plgpu
+except ImportError:
+    from jax.experimental.pallas import gpu as plgpu
 
 from .utils import (
     big_number,

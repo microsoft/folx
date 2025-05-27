@@ -5,7 +5,11 @@ from typing import Literal, Tuple
 import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
-from jax.experimental.pallas import gpu as plgpu
+
+try:
+    from jax.experimental.pallas import triton as plgpu
+except ImportError:
+    from jax.experimental.pallas import gpu as plgpu
 
 from .mhsa import mhsa_kernel, reference_mhsa_kernel
 from .mhsea import mhsea_kernel, reference_mhsea_kernel

@@ -5,7 +5,11 @@ from typing import Any, Dict, Tuple
 import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
-from jax.experimental.pallas import gpu as plgpu
+
+try:
+    from jax.experimental.pallas import triton as plgpu
+except ImportError:
+    from jax.experimental.pallas import gpu as plgpu
 
 from folx import forward_laplacian
 from folx.api import FwdJacobian, FwdLaplArray
