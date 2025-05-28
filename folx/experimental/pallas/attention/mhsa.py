@@ -6,13 +6,9 @@ import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
 
-try:
-    from jax.experimental.pallas import triton as plgpu
-except ImportError:
-    from jax.experimental.pallas import gpu as plgpu
-
 from .utils import (
     big_number,
+    compiler_params,
     compute_q_and_kv_block_len,
     create_grid,
     get_mask_block_spec,
@@ -63,9 +59,7 @@ def mhsa(
             out_shape=jax.ShapeDtypeStruct(
                 shape=(batch_len, seq_len, num_heads, head_len), dtype=q.dtype
             ),
-            compiler_params=plgpu.TritonCompilerParams(
-                num_warps=num_warps, num_stages=num_stages
-            ),
+            compiler_params=compiler_params(num_warps=num_warps, num_stages=num_stages),
             debug=False,
             interpret=interpret,
             name='mhsa',
