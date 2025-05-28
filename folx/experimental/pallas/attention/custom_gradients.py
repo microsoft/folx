@@ -10,6 +10,7 @@ from .mhsa import mhsa_kernel, reference_mhsa_kernel
 from .mhsea import mhsea_kernel, reference_mhsea_kernel
 from .utils import (
     big_number,
+    compiler_params,
     compute_q_and_kv_block_len,
     create_grid,
     get_lse_block_spec,
@@ -53,9 +54,7 @@ def mhsa_forward(
             out_shape=jax.ShapeDtypeStruct(
                 shape=(batch_len, seq_len, num_heads, head_len), dtype=q.dtype
             ),
-            compiler_params=dict(
-                triton=dict(num_warps=num_warps, num_stages=num_stages)
-            ),
+            compiler_params=compiler_params(num_warps=num_warps, num_stages=num_stages),
             debug=False,
             interpret=interpret,
             name='mhsa_forward',
@@ -113,9 +112,7 @@ def mhsa_backward(
                     shape=(batch_len, seq_len, num_heads, head_len), dtype=q.dtype
                 ),
             ],
-            compiler_params=dict(
-                triton=dict(num_warps=num_warps, num_stages=num_stages)
-            ),
+            compiler_params=compiler_params(num_warps=num_warps, num_stages=num_stages),
             debug=False,
             interpret=interpret,
             name='mhsa_backward',
@@ -268,9 +265,7 @@ def mhsea_forward(
                     shape=(batch_len, seq_len, num_heads), dtype=v.dtype
                 ),
             ],
-            compiler_params=dict(
-                triton=dict(num_warps=num_warps, num_stages=num_stages)
-            ),
+            compiler_params=compiler_params(num_warps=num_warps, num_stages=num_stages),
             debug=False,
             interpret=interpret,
             name='mhea_forward',
@@ -372,9 +367,7 @@ def mhsea_backward(
                     shape=(batch_len, seq_len, num_heads, seq_len), dtype=e.dtype
                 ),
             ],
-            compiler_params=dict(
-                triton=dict(num_warps=num_warps, num_stages=num_stages)
-            ),
+            compiler_params=compiler_params(num_warps=num_warps, num_stages=num_stages),
             debug=False,
             interpret=interpret,
             name='mhsea_backward_q_vjp',
@@ -433,9 +426,7 @@ def mhsea_backward(
                     shape=(batch_len, seq_len, num_heads, head_len), dtype=v.dtype
                 ),
             ],
-            compiler_params=dict(
-                triton=dict(num_warps=num_warps, num_stages=num_stages)
-            ),
+            compiler_params=compiler_params(num_warps=num_warps, num_stages=num_stages),
             debug=False,
             interpret=interpret,
             name='mhsea_backward_kv_vjp',

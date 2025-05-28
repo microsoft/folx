@@ -4,6 +4,14 @@ import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
 
+try:
+    from jax.experimental.pallas import triton as plgpu
+except ImportError:
+    from jax.experimental.pallas import gpu as plgpu
+
+
+from packaging.version import Version
+
 
 def sum_columns(x: jax.Array) -> jax.Array:
     return x.sum(axis=1, keepdims=True)
@@ -210,3 +218,10 @@ def big_number(dtype) -> float:
         return 1e40
     else:
         raise ValueError(f'Unexpected dtype {dtype}')
+
+
+def compiler_params(num_warps, num_stages):
+    if Version(jax.__version__) >= Version('0.4.34'):
+        return plgpu.TritonCompilerParams(num_warps=num_warps, num_stages=num_stages)
+    else:
+        return dict(triton=dict(num_warps=num_warps, num_stages=num_stages))
