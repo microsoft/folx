@@ -214,7 +214,7 @@ def eval_jaxpr_with_forward_laplacian(
                     outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
             elif eqn.primitive.name == 'scan':
                 outvals = eval_scan(eqn, invals)
-            elif eqn.primitive.name == 'pjit':
+            elif eqn.primitive.name in ('jit', 'pjit'):
                 outvals = eval_pjit(eqn, invals)
             elif eqn.primitive.name == 'custom_jvp_call':
                 outvals = eval_custom_jvp(eqn, invals)
