@@ -275,7 +275,10 @@ def sparse_index_jvp(
         # https://github.com/google/jax/pull/3370
         with jax.ensure_compile_time_eval():
             extra_filled = jtu.tree_map(
-                lambda x: jnp.full(x.shape, -1, dtype=jnp.int32), extra_args
+                lambda x: jnp.full(
+                    x.shape if isinstance(x, jax.Array) else (), -1, dtype=jnp.int32
+                ),
+                extra_args,
             )
 
             def _merged_fwd(*args):

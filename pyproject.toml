@@ -1,6 +1,6 @@
 [project]
 name = "folx"
-version = "0.2.18"
+version = "0.2.19"
 description = "Forward Laplacian for JAX"
 authors = [
     { name = "Nicholas Gao", email = "n.gao@tum.de" },
