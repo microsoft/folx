@@ -72,7 +72,8 @@ def jacrev(f):
         out = flat_f(flat_primals)
 
         eye = jnp.eye(out.size, dtype=out.dtype)
-        eye = jax.lax.pvary(eye, tuple(jax.typeof(out).vma))
+        if hasattr(jax.lax, 'pvary'):
+            eye = jax.lax.pvary(eye, tuple(jax.typeof(out).vma))
         result = jax.vmap(vjp(flat_f, flat_primals))(
             eye
         )[0]
