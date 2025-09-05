@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
+from functools import partial
 from laplacian_testcase import LaplacianTestCase
 from parameterized import parameterized
 
@@ -14,6 +15,8 @@ from folx import (
     wrap_forward_laplacian,
 )
 from folx.api import FwdLaplArray
+
+from packaging.version import Version
 
 
 class TestForwardLaplacian(LaplacianTestCase):
@@ -174,28 +177,48 @@ class TestForwardLaplacian(LaplacianTestCase):
             w = w + 1j * np.random.normal(size=w.shape)
 
         @jax.jit
-        def f(x):
+        def _f(w, x):
             return jnp.linalg.slogdet(jnp.tanh((x @ w).reshape(16, 16)))
 
-        for sparsity in [0, x.size]:
-            with self.subTest(sparsity=sparsity):
-                sign_y, log_y = jax.jit(forward_laplacian(f, sparsity))(x)
-                self.assertEqual(log_y.x.shape, f(x)[1].shape)
-                self.assert_allclose(log_y.x, f(x)[1])
-                self.assert_allclose(
-                    log_y.jacobian.dense_array, self.jacobian(f, x)[1].T
-                )
-                self.assert_allclose(log_y.laplacian, self.laplacian(f, x)[1])
+        f = partial(_f, w)
 
-                self.assertEqual(sign_y.shape, log_y.x.shape)
-                if test_complex:
-                    self.assertIsInstance(sign_y, FwdLaplArray)
+        for sparsity in [0, x.size]:
+            for use_shard_map in [False, True]:
+                with self.subTest(sparsity=sparsity, use_shard_map=use_shard_map):
+                    if use_shard_map and \
+                       (Version(jax.__version__) < Version('0.7.1') or \
+                       (sparsity!=0 and Version(jax.__version__) < Version('0.7.2'))):
+                        self.skipTest("jax version too old")
+                    if use_shard_map:
+                        mesh = jax.sharding.Mesh(jax.devices()[:1], "i", axis_types=jax.sharding.AxisType.Explicit)
+                        @jax.jit
+                        @partial(jax.shard_map, in_specs=(jax.P(), jax.P('i')), out_specs=jax.P('i'))
+                        @partial(jax.vmap, in_axes=(None, 0))
+                        def forward_laplacian_sh(w, x):
+                            return forward_laplacian(partial(_f, w), sparsity)(x)
+                        with jax.set_mesh(mesh):
+                            x_sh = jax.sharding.reshard(x[None], jax.P('i'))
+                            w_sh = jax.sharding.reshard(w, jax.P())
+                            sign_y_sh, log_y_sh = jax.tree.map(lambda x: x[0], forward_laplacian_sh(w_sh, x_sh))
+                    else:
+                        sign_y, log_y = jax.jit(forward_laplacian(f, sparsity))(x)
+
+                    self.assertEqual(log_y.x.shape, f(x)[1].shape)
+                    self.assert_allclose(log_y.x, f(x)[1])
                     self.assert_allclose(
-                        sign_y.jacobian.dense_array, self.jacobian(f, x)[0].T
+                        log_y.jacobian.dense_array, self.jacobian(f, x)[1].T
                     )
-                    self.assert_allclose(sign_y.laplacian, self.laplacian(f, x)[0])
-                else:
-                    self.assertIsInstance(sign_y, jax.Array)
+                    self.assert_allclose(log_y.laplacian, self.laplacian(f, x)[1])
+
+                    self.assertEqual(sign_y.shape, log_y.x.shape)
+                    if test_complex:
+                        self.assertIsInstance(sign_y, FwdLaplArray)
+                        self.assert_allclose(
+                            sign_y.jacobian.dense_array, self.jacobian(f, x)[0].T
+                        )
+                        self.assert_allclose(sign_y.laplacian, self.laplacian(f, x)[0])
+                    else:
+                        self.assertIsInstance(sign_y, jax.Array)
 
     def test_custom_hessian(self):
         x = np.random.normal(size=(16,))
