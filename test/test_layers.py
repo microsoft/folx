@@ -212,7 +212,7 @@ class TestForwardLaplacian(LaplacianTestCase):
                         with jax.set_mesh(mesh):
                             x_sh = jax.sharding.reshard(x[None], jax.P('i'))
                             w_sh = jax.sharding.reshard(w, jax.P())
-                            sign_y_sh, log_y_sh = jax.tree.map(
+                            sign_y, log_y = jax.tree.map(
                                 lambda x: x[0], forward_laplacian_sh(w_sh, x_sh)
                             )
                     else:
@@ -234,6 +234,8 @@ class TestForwardLaplacian(LaplacianTestCase):
                         self.assert_allclose(sign_y.laplacian, self.laplacian(f, x)[0])
                     else:
                         self.assertIsInstance(sign_y, jax.Array)
+                    del sign_y
+                    del log_y
 
     def test_custom_hessian(self):
         x = np.random.normal(size=(16,))
