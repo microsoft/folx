@@ -222,6 +222,11 @@ def big_number(dtype) -> float:
 
 def compiler_params(num_warps, num_stages):
     if Version(jax.__version__) >= Version('0.4.34'):
-        return plgpu.TritonCompilerParams(num_warps=num_warps, num_stages=num_stages)
+        if hasattr(plgpu, 'CompilerParams'):
+            return plgpu.CompilerParams(num_warps=num_warps, num_stages=num_stages)
+        else:
+            return plgpu.TritonCompilerParams(
+                num_warps=num_warps, num_stages=num_stages
+            )
     else:
         return dict(triton=dict(num_warps=num_warps, num_stages=num_stages))
