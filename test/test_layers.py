@@ -1,11 +1,12 @@
 import functools
+from functools import partial
 
 import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
-from functools import partial
 from laplacian_testcase import LaplacianTestCase
+from packaging.version import Version
 from parameterized import parameterized
 
 from folx import (
@@ -15,8 +16,6 @@ from folx import (
     wrap_forward_laplacian,
 )
 from folx.api import FwdLaplArray
-
-from packaging.version import Version
 
 
 class TestForwardLaplacian(LaplacianTestCase):
@@ -185,21 +184,37 @@ class TestForwardLaplacian(LaplacianTestCase):
         for sparsity in [0, x.size]:
             for use_shard_map in [False, True]:
                 with self.subTest(sparsity=sparsity, use_shard_map=use_shard_map):
-                    if use_shard_map and \
-                       (Version(jax.__version__) < Version('0.7.1') or \
-                       (sparsity!=0 and Version(jax.__version__) < Version('0.7.2'))):
-                        self.skipTest("jax version too old")
+                    if use_shard_map and (
+                        Version(jax.__version__) < Version('0.7.1')
+                        or (
+                            sparsity != 0
+                            and Version(jax.__version__) < Version('0.7.2')
+                        )
+                    ):
+                        self.skipTest('jax version too old')
                     if use_shard_map:
-                        mesh = jax.sharding.Mesh(jax.devices()[:1], "i", axis_types=jax.sharding.AxisType.Explicit)
+                        mesh = jax.sharding.Mesh(
+                            jax.devices()[:1],
+                            'i',
+                            axis_types=jax.sharding.AxisType.Explicit,
+                        )
+
                         @jax.jit
-                        @partial(jax.shard_map, in_specs=(jax.P(), jax.P('i')), out_specs=jax.P('i'))
+                        @partial(
+                            jax.shard_map,
+                            in_specs=(jax.P(), jax.P('i')),
+                            out_specs=jax.P('i'),
+                        )
                         @partial(jax.vmap, in_axes=(None, 0))
                         def forward_laplacian_sh(w, x):
                             return forward_laplacian(partial(_f, w), sparsity)(x)
+
                         with jax.set_mesh(mesh):
                             x_sh = jax.sharding.reshard(x[None], jax.P('i'))
                             w_sh = jax.sharding.reshard(w, jax.P())
-                            sign_y_sh, log_y_sh = jax.tree.map(lambda x: x[0], forward_laplacian_sh(w_sh, x_sh))
+                            sign_y_sh, log_y_sh = jax.tree.map(
+                                lambda x: x[0], forward_laplacian_sh(w_sh, x_sh)
+                            )
                     else:
                         sign_y, log_y = jax.jit(forward_laplacian(f, sparsity))(x)
 
