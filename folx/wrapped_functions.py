@@ -227,6 +227,10 @@ def slogdet_jvp(primals, tangents):
             log_det_jvp = jac_dot_tangent.real
         else:
             sign_jvp = jnp.zeros((), dtype=jac_dot_tangent.dtype)
+            if hasattr(jax.lax, 'pvary'):
+                sign_jvp = jax.lax.pvary(
+                    sign_jvp, tuple(jax.typeof(jac_dot_tangent).vma)
+                )
             log_det_jvp = jac_dot_tangent
         return (sign_jvp, log_det_jvp)
 

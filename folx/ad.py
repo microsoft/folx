@@ -71,9 +71,10 @@ def jacrev(f):
 
         out = flat_f(flat_primals)
 
-        result = jax.vmap(vjp(flat_f, flat_primals))(
-            jnp.eye(out.size, dtype=out.dtype)
-        )[0]
+        eye = jnp.eye(out.size, dtype=out.dtype)
+        if hasattr(jax.lax, 'pvary'):
+            eye = jax.lax.pvary(eye, tuple(jax.typeof(out).vma))
+        result = jax.vmap(vjp(flat_f, flat_primals))(eye)[0]
         result = jax.vmap(unravel, out_axes=0)(result)
         if len(primals) == 1:
             return result[0]

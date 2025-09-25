@@ -131,7 +131,18 @@ class FwdJacobian(NamedTuple):
 
         if isinstance(outputs, np.ndarray):
             with jax.ensure_compile_time_eval():
-                result = np.asarray(get_indices(flat_mask, flat_outputs), dtype=int).T
+                if hasattr(jax.sharding, 'use_abstract_mesh'):  # jax>=0.7.2
+                    # see https://github.com/jax-ml/jax/discussions/31461
+                    with jax.sharding.use_abstract_mesh(
+                        jax.sharding.AbstractMesh((), ())
+                    ):
+                        result = np.asarray(
+                            get_indices(flat_mask, flat_outputs), dtype=int
+                        ).T
+                else:
+                    result = np.asarray(
+                        get_indices(flat_mask, flat_outputs), dtype=int
+                    ).T
         else:
             result = get_indices(flat_mask, flat_outputs).T
         return result.reshape(mask.shape)
