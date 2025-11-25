@@ -2,10 +2,15 @@ from functools import partial
 
 import jax
 import jax.numpy as jnp
+import pytest
+from packaging.version import Version
 
 from folx import forward_laplacian
 
 
+@pytest.mark.skipif(
+    Version(jax.__version__) < Version('0.7.1'), reason='jax version too old'
+)
 def test_shard_map_bug_integer_pow():
     # see https://github.com/microsoft/folx/issues/38
 
