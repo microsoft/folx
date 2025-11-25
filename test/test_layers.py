@@ -50,7 +50,7 @@ class TestForwardLaplacian(LaplacianTestCase):
             x = x + 1j * np.random.randn(10)
         for f in functions:
             for sparsity in [0, x.size]:
-                with self.subTest(sparsity=sparsity, f=f):
+                with self.subTest(sparsity=sparsity, f=getattr(f, '__name__', str(f))):
                     y = forward_laplacian(f, sparsity)(x)
                     self.assertEqual(y.x.shape, x.shape, msg=f'{f}')
                     self.assert_allclose(y.x, f(x))
@@ -79,7 +79,9 @@ class TestForwardLaplacian(LaplacianTestCase):
 
             for sparsity in [0, x1.size]:
                 # test both arguments
-                with self.subTest(sparsity=sparsity, f=f, binary=True):
+                with self.subTest(
+                    sparsity=sparsity, f=getattr(f, '__name__', str(f)), binary=True
+                ):
                     y = forward_laplacian(wrapped_f, sparsity)(x)
                     self.assertEqual(y.x.shape, x1.shape, msg=f'{f}')
                     self.assert_allclose(y.x, wrapped_f(x))
@@ -89,7 +91,9 @@ class TestForwardLaplacian(LaplacianTestCase):
                     self.assert_allclose(y.laplacian, self.laplacian(wrapped_f, x))
 
                 # test left hand argument
-                with self.subTest(sparsity=sparsity, f=f, binary=False):
+                with self.subTest(
+                    sparsity=sparsity, f=getattr(f, '__name__', str(f)), binary=False
+                ):
                     y = forward_laplacian(f_left, sparsity)(x1)
                     self.assertEqual(y.x.shape, x1.shape, msg=f'{f}')
                     self.assert_allclose(y.x, f_left(x1))
@@ -99,7 +103,9 @@ class TestForwardLaplacian(LaplacianTestCase):
                     self.assert_allclose(y.laplacian, self.laplacian(f_left, x1))
 
                 # test right hand argument
-                with self.subTest(sparsity=sparsity, f=f, binary=False):
+                with self.subTest(
+                    sparsity=sparsity, f=getattr(f, '__name__', str(f)), binary=False
+                ):
                     y = forward_laplacian(f_right, sparsity)(x1)
                     self.assertEqual(y.x.shape, x1.shape, msg=f'{f}')
                     self.assert_allclose(y.x, f_right(x1))
@@ -280,7 +286,7 @@ class TestForwardLaplacian(LaplacianTestCase):
             jnp.complex64,
             jnp.complex128,
         ]:
-            with self.subTest(dtype=dtype):
+            with self.subTest(dtype=dtype.__name__):
                 y = jax.jit(forward_laplacian(functools.partial(f, dtype=dtype)))(x)
                 self.assertEqual(y.x.dtype, dtype)
                 self.assertEqual(y.jacobian.dense_array.dtype, dtype)
@@ -297,7 +303,7 @@ class TestForwardLaplacian(LaplacianTestCase):
             jnp.uint32,
             jnp.uint64,
         ]:
-            with self.subTest(dtype=dtype):
+            with self.subTest(dtype=dtype.__name__):
                 y = jax.jit(forward_laplacian(functools.partial(f, dtype=dtype)))(x)
                 self.assertIsInstance(y, jax.Array)
 
