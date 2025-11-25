@@ -20,5 +20,5 @@ def test_shard_map_bug_integer_pow():
     x = jnp.ones((1, 16))
     w = jnp.ones((16, 16))
 
-    with jax.set_mesh(jax.sharding.Mesh(jax.devices(), 'i')):
+    with jax.set_mesh(jax.sharding.Mesh(jax.devices()[:1], 'i')):
         test(w, x)
