@@ -94,6 +94,8 @@ def jacfwd(f):
             return jax.jvp(f, primals, unravel(s))[1]
 
         eye = jnp.eye(flat_primals.size, dtype=flat_primals.dtype)
+        if hasattr(jax.lax, 'pvary'):
+            eye = jax.lax.pvary(eye, tuple(jax.typeof(flat_primals).vma))
         J = jax.vmap(jvp_fun, out_axes=-1)(eye)
         return J
 
