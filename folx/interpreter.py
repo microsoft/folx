@@ -1,5 +1,6 @@
 import functools
 import logging
+import re
 import warnings
 from collections import defaultdict
 from typing import TYPE_CHECKING, Callable, ParamSpec, Sequence, TypeVar
@@ -42,6 +43,36 @@ from .wrapped_functions import get_laplacian, wrap_forward_laplacian
 
 R = TypeVar('R', bound=PyTree[Array])
 P = ParamSpec('P')
+
+
+def _version_key(version: str) -> tuple[int, ...]:
+    return tuple(
+        int(match.group(0))
+        for part in version.split('.')
+        if (match := re.match(r'\d+', part)) is not None
+    )
+
+
+_USES_DICT_BIND_PARAMS = _version_key(jax.__version__) >= (0, 9, 2)
+
+
+def _split_bind_params(primitive, params):
+    """Normalize JAX primitive bind params across old and new JAX APIs."""
+
+    bind_params = primitive.get_bind_params(params)
+    if _USES_DICT_BIND_PARAMS:
+        if not isinstance(bind_params, dict):
+            raise TypeError(
+                'Expected primitive.get_bind_params() to return a dict for '
+                f'JAX >= 0.9.2, got {bind_params!r}.'
+            )
+        return (), bind_params
+    if not isinstance(bind_params, tuple) or len(bind_params) != 2:
+        raise TypeError(
+            'Expected primitive.get_bind_params() to return a 2-tuple for '
+            f'JAX < 0.9.2, got {bind_params!r}.'
+        )
+    return bind_params
 
 
 class JaxExprEnvironment:
@@ -169,7 +200,7 @@ def eval_jaxpr_with_forward_laplacian(
         )
 
     def eval_custom_jvp(eqn: JaxprEqn, invals):
-        subfuns, args = eqn.primitive.get_bind_params(eqn.params)
+        subfuns, args = _split_bind_params(eqn.primitive, eqn.params)
         fn = functools.partial(eqn.primitive.bind, *subfuns, **args)
         with LoggingPrefix(f'({summarize(eqn.source_info)})'):
             return wrap_forward_laplacian(fn)(
@@ -177,7 +208,7 @@ def eval_jaxpr_with_forward_laplacian(
             )
 
     def eval_laplacian(eqn: JaxprEqn, invals):
-        subfuns, params = eqn.primitive.get_bind_params(eqn.params)
+        subfuns, params = _split_bind_params(eqn.primitive, eqn.params)
         with LoggingPrefix(f'({summarize(eqn.source_info)})'):
             fn = get_laplacian(eqn.primitive, True)
             return fn(
@@ -189,7 +220,7 @@ def eval_jaxpr_with_forward_laplacian(
         # Eval expression
         try:
             if all(not isinstance(x, FwdLaplArray) for x in invals):
-                subfuns, bind_params = eqn.primitive.get_bind_params(eqn.params)
+                subfuns, bind_params = _split_bind_params(eqn.primitive, eqn.params)
                 # If non of the inputs were dependent on an FwdLaplArray,
                 # we can just use the regular primitive. This will avoid
                 # omnistaging. While this could cost us some memory and speed,
