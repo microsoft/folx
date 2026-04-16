@@ -45,4 +45,6 @@ def test_split_bind_params_rejects_dict_on_legacy_jax(monkeypatch):
 def test_split_bind_params_rejects_tuple_on_new_jax(monkeypatch):
     monkeypatch.setattr(interpreter_mod, '_USES_DICT_BIND_PARAMS', True)
     with pytest.raises(TypeError, match='JAX >= 0.9.2'):
-        interpreter_mod._split_bind_params(_DummyPrimitive((['fn'], {'x': 2})), {'x': 1})
+        interpreter_mod._split_bind_params(
+            _DummyPrimitive((['fn'], {'x': 2})), {'x': 1}
+        )
