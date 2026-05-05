@@ -126,7 +126,7 @@ def mhsea_kernel(
     q_block_len = q_block_len or q_ref.shape[0]
     kv_mask = mask_ref[:]
     q_slice = pl.Slice(q_idx * q_block_len, q_block_len)
-    q_mask = pl.load(mask_ref, (q_slice,))
+    q_mask = mask_ref[q_slice]
     square_mask = q_mask[:, None] * kv_mask[None, :]
     # Forward pass
     q = jnp.where(q_mask[:, None], q_ref[:, :], 0.0)

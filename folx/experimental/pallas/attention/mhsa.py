@@ -120,7 +120,7 @@ def mhsa_kernel(
     kv_mask = mask_ref[:]
     # q_slice extracts the relevant slice of the q matrix
     q_slice = pl.dslice(q_idx * q_block_len, q_block_len)
-    q_mask = pl.load(mask_ref, (q_slice,))
+    q_mask = mask_ref[q_slice]
     square_mask = q_mask[:, None] * kv_mask[None, :]
     # Forward pass
     q = q_ref[:, :]

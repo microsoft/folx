@@ -393,7 +393,7 @@ def mhsa_forward_laplacian_kernel(
     v_lap = jnp.where(kv_mask[:, None], v_lap_ref[:, :], 0.0)
 
     q_slice = pl.dslice(q_idx * q_block_len, q_block_len)
-    q_mask = pl.load(mask_ref, (q_slice,))
+    q_mask = mask_ref[q_slice]
     square_mask = q_mask[:, None] * kv_mask[None, :]
     # Forward pass
     q = q_x_ref[:, :]
@@ -793,7 +793,7 @@ def mhsea_forward_laplacian_kernel(
     v = jnp.where(kv_mask[:, None], v_x_ref[:, :], 0.0)
 
     q_slice = pl.Slice(q_idx * q_block_len, q_block_len)
-    q_mask = pl.load(mask_ref, (q_slice,))
+    q_mask = mask_ref[q_slice]
     square_mask = q_mask[:, None] * kv_mask[None, :]
     # Forward pass
     q = jnp.where(q_mask[:, None], q_x_ref[:, :], 0.0)
