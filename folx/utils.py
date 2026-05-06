@@ -44,6 +44,30 @@ def tree_shapes(tree: PyTree[Array]) -> list[tuple[int, ...]]:
     return [l.shape for l in leaves]
 
 
+def _varying_axes(x: jax.Array) -> tuple[int | str, ...]:
+    if not hasattr(jax, 'typeof'):
+        return ()
+
+    typ = jax.typeof(x)
+    manual_axis_type = getattr(typ, 'manual_axis_type', None)
+    if manual_axis_type is not None:
+        return tuple(getattr(manual_axis_type, 'varying', ()))
+
+    return tuple(getattr(typ, 'vma', ()))
+
+
+def _mark_varying_like(x: jax.Array, like: jax.Array) -> jax.Array:
+    axes = _varying_axes(like)
+    if not axes:
+        return x
+
+    if hasattr(jax.lax, 'pcast'):
+        return jax.lax.pcast(x, axes, to='varying')
+    if hasattr(jax.lax, 'pvary'):
+        return jax.lax.pvary(x, axes)
+    return x
+
+
 def trace_of_product(mat1: Array, mat2: Array):
     """
     Computes the trace of the product of the given matrices.
