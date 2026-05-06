@@ -28,7 +28,7 @@ from .custom_hessian import (
     div_jac_hessian_jac,
     slogdet_jac_hessian_jac,
 )
-from .utils import _mark_varying_like
+from .utils import mark_varying_like
 from .wrapper import (
     warp_without_fwd_laplacian,
     wrap_elementwise,
@@ -227,7 +227,7 @@ def slogdet_jvp(primals, tangents):
             sign_jvp = jac_dot_tangent
             log_det_jvp = jac_dot_tangent.real
         else:
-            sign_jvp = _mark_varying_like(
+            sign_jvp = mark_varying_like(
                 jnp.zeros((), dtype=jac_dot_tangent.dtype), jac_dot_tangent
             )
             log_det_jvp = jac_dot_tangent

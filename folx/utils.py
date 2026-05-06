@@ -44,7 +44,7 @@ def tree_shapes(tree: PyTree[Array]) -> list[tuple[int, ...]]:
     return [l.shape for l in leaves]
 
 
-def _varying_axes(x: jax.Array) -> tuple[int | str, ...]:
+def varying_axes(x: jax.Array) -> tuple[int | str, ...]:
     if not hasattr(jax, 'typeof'):
         return ()
 
@@ -56,8 +56,8 @@ def _varying_axes(x: jax.Array) -> tuple[int | str, ...]:
     return tuple(getattr(typ, 'vma', ()))
 
 
-def _mark_varying_like(x: jax.Array, like: jax.Array) -> jax.Array:
-    axes = _varying_axes(like)
+def mark_varying_like(x: jax.Array, like: jax.Array) -> jax.Array:
+    axes = varying_axes(like)
     if not axes:
         return x
 
@@ -300,8 +300,9 @@ def split_args(
     brd_axes = broadcast_shapes_to_args(args, in_axes)
     leaves, tree_def = jtu.tree_flatten(
         args,
-        is_leaf=lambda x: isinstance(x, filter_type)
-        or not isinstance(x, (dict, list, tuple)),
+        is_leaf=lambda x: (
+            isinstance(x, filter_type) or not isinstance(x, (dict, list, tuple))
+        ),
     )
     flat_axes = tree_def.flatten_up_to(brd_axes)
 
