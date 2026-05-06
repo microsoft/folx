@@ -8,12 +8,16 @@ from jaxtyping import Array, ArrayLike, PyTree
 T = TypeVar('T', bound=PyTree[ArrayLike])
 
 
+def _is_leaf_pytree(x) -> bool:
+    return jtu.treedef_is_leaf(jtu.tree_structure(x))
+
+
 def tree_scale(tree: T, x: ArrayLike) -> T:
     return jtu.tree_map(lambda a: a * x, tree)
 
 
 def tree_mul(tree: T, x: T | ArrayLike) -> T:
-    if isinstance(x, ArrayLike):
+    if _is_leaf_pytree(x):
         return tree_scale(tree, x)
     return jtu.tree_map(lambda a, b: a * b, tree, x)
 
@@ -23,7 +27,7 @@ def tree_shift(tree1: T, x: ArrayLike) -> T:
 
 
 def tree_add(tree1: T, tree2: T | ArrayLike) -> T:
-    if isinstance(tree2, ArrayLike):
+    if _is_leaf_pytree(tree2):
         return tree_shift(tree1, tree2)
     return jtu.tree_map(lambda a, b: a + b, tree1, tree2)
 

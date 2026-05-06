@@ -3,6 +3,8 @@ import jax.flatten_util as jfu
 import jax.numpy as jnp
 import jax.tree_util as jtu
 
+from .utils import _mark_varying_like
+
 
 def is_tree_complex(tree):
     leaves = jtu.tree_leaves(tree)
@@ -72,8 +74,7 @@ def jacrev(f):
         out = flat_f(flat_primals)
 
         eye = jnp.eye(out.size, dtype=out.dtype)
-        if hasattr(jax.lax, 'pvary'):
-            eye = jax.lax.pvary(eye, tuple(jax.typeof(out).vma))
+        eye = _mark_varying_like(eye, out)
         result = jax.vmap(vjp(flat_f, flat_primals))(eye)[0]
         result = jax.vmap(unravel, out_axes=0)(result)
         if len(primals) == 1:
@@ -94,8 +95,7 @@ def jacfwd(f):
             return jax.jvp(f, primals, unravel(s))[1]
 
         eye = jnp.eye(flat_primals.size, dtype=flat_primals.dtype)
-        if hasattr(jax.lax, 'pvary'):
-            eye = jax.lax.pvary(eye, tuple(jax.typeof(flat_primals).vma))
+        eye = _mark_varying_like(eye, flat_primals)
         J = jax.vmap(jvp_fun, out_axes=-1)(eye)
         return J
 
