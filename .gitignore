@@ -163,3 +163,5 @@ poetry.lock
 
 notebooks/
 .vscode/
+.claude_scratch/
+benchmarks/

@@ -15,6 +15,7 @@ except ImportError:
 from folx.ad import is_tree_complex
 
 from .api import (
+    JAC_DIM,
     Array,
     ArrayOrFwdLaplArray,
     ForwardLaplacian,
@@ -214,46 +215,45 @@ def dot_general(
     # ====================================================================================
     # Fast path for sparse solutions with reasonably small intermediate size
     # ====================================================================================
-    # If the intermediate size is the same as the largest input size, we can also
-    # accelerate things by decomposing the dot product into a sum and a multiplication.
-    # This costs more memory but should generally be faster thanks to sparser operations.
+    # Decomposing the dot product into a multiplication and a sum materializes the
+    # product's sparse Jacobian of size k_mul * inter_size (k_mul = summed sparse rows
+    # of both operands). The general path materializes dense Jacobians of size
+    # n_dense * in_size instead. Use the decomposition whenever it is the cheaper one;
+    # it should generally be faster thanks to sparser operations.
     inter_size = np.prod(jnp.broadcast_shapes(left_inp.shape, right_inp.shape))
     in_size = max(left_inp.size, right_inp.size)
+    use_mul_sum = False
+    if all_weak:
+        assert isinstance(lhs, FwdLaplArray) and isinstance(rhs, FwdLaplArray)
+        lh_mask, rh_mask = lhs.jacobian.x0_idx, rhs.jacobian.x0_idx
+        assert lh_mask is not None and rh_mask is not None
+        if lh_mask.size > 0 and rh_mask.size > 0:
+            k_mul = lhs.jacobian.data.shape[JAC_DIM] + rhs.jacobian.data.shape[JAC_DIM]
+            n_dense = max(lhs.jacobian.max_n, rhs.jacobian.max_n) + 1
+            use_mul_sum = bool(
+                inter_size == in_size or k_mul * inter_size < n_dense * in_size
+            )
 
-    def fwd_lapl_mul_sum(
-        lhs: FwdLaplArray, rhs: FwdLaplArray, dims: tuple[int, ...] | int
-    ):
-        # Fwd Laplacian for multiply and sum
+    if use_mul_sum:
+        # The rearranged inputs reproduce dot_general exactly via broadcasting
+        # (batch, lhs_brdcast, rhs_brdcast, contract), so this is valid for any
+        # dimension numbers.
+        def mul_sum(x, y):
+            # dot_general accumulates in preferred_element_type; cast so the
+            # decomposition matches its output dtype and precision.
+            if preferred_element_type is not None:
+                x = x.astype(preferred_element_type)
+                y = y.astype(preferred_element_type)
+            return (x * y).sum(-1)
+
         # lazy import to avoid circular imports
         from .interpreter import forward_laplacian
 
         return forward_laplacian(
-            lambda x, y: (x * y).sum(dims),
+            mul_sum,
             disable_jit=True,
             sparsity_threshold=sparsity_threshold,
-        )(lhs, rhs)
-
-    if inter_size == in_size and all_weak:
-        neg_lh_batch_dims = tuple(np.array(lh_batch_dims) - lhs.ndim)
-        neg_rh_batch_dims = tuple(np.array(rh_batch_dims) - rhs.ndim)
-        neg_lh_contract = tuple(np.array(lh_contract) - lhs.ndim)
-        neg_rh_contract = tuple(np.array(rh_contract) - rhs.ndim)
-        if (
-            neg_lh_contract == neg_rh_contract
-            and neg_lh_batch_dims == neg_rh_batch_dims
-            and lh_brdcast_dims == tuple(range(len(lh_brdcast_dims)))
-            and rh_brdcast_dims == tuple(range(len(rh_brdcast_dims)))
-            and lh_batch_dims == tuple(sorted(lh_batch_dims))
-            and rh_batch_dims == tuple(sorted(rh_batch_dims))
-        ):
-            # The checks above do the following:
-            # * check that batch dims are identical in both
-            # * check that contract dim are identical in both
-            # * check that all brdcast dims are at the beginning
-            # * check that no transpositions are needed
-            # Special case where we can skip the transpositions
-            return fwd_lapl_mul_sum(lhs, rhs, lh_contract)  # type: ignore
-        return fwd_lapl_mul_sum(left_inp, right_inp, -1)
+        )(left_inp, right_inp)
 
     # ====================================================================================
     # General solution

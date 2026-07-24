@@ -136,6 +136,90 @@ class TestForwardLaplacian(LaplacianTestCase):
                 self.assert_allclose(y.jacobian.dense_array, self.jacobian(f, x).T)
                 self.assert_allclose(y.laplacian, self.laplacian(f, x))
 
+    def test_matmul_both_sparse(self):
+        # Regression test for #35: matmul where both operands have sparse
+        # Jacobians and the broadcast intermediate is larger than the inputs.
+        n, d = 8, 3
+        x = np.random.normal(size=(n, d))
+
+        @jax.jit
+        def attn(x):
+            s = jnp.exp(jnp.matmul(x, jnp.swapaxes(x, -2, -1)))
+            return jnp.matmul(s, x)
+
+        @jax.jit
+        def rect(x):
+            u = jnp.sin(x)  # (n, d)
+            v = jnp.cos(jnp.swapaxes(x, -2, -1))  # (d, n)
+            return jnp.matmul(u, v)
+
+        for f in [attn, rect]:
+            for sparsity in [0, x.size]:
+                with self.subTest(f=f.__name__, sparsity=sparsity):
+                    y = forward_laplacian(f, sparsity)(x)
+                    out_shape = f(x).shape
+                    self.assertEqual(y.x.shape, out_shape)
+                    self.assert_allclose(y.x, f(x))
+                    jac = self.jacobian(f, x).reshape(*out_shape, x.size)
+                    self.assert_allclose(
+                        y.jacobian.dense_array, np.moveaxis(jac, -1, 0)
+                    )
+                    self.assert_allclose(
+                        y.laplacian, self.laplacian(f, x).reshape(out_shape)
+                    )
+
+    def test_matmul_degenerate_broadcast_shapes(self):
+        # einsum patterns whose dot_general has a size-1 or rank-mismatched
+        # broadcast dim; the mul-sum decomposition must keep the output shape.
+        k = 3
+        x = np.random.normal(size=(5, k))
+
+        cases = [
+            lambda x: jnp.einsum('nk,mk->nm', x, jnp.sin(x[:1])),  # (5, 1)
+            lambda x: jnp.einsum('nk,mk->nm', x[:1], jnp.sin(x)),  # (1, 5)
+            lambda x: jnp.einsum('k,mk->m', x[0], jnp.sin(x[:k])),  # (k,)
+        ]
+        for i, f in enumerate(cases):
+            for sparsity in [0, x.size]:
+                with self.subTest(case=i, sparsity=sparsity):
+                    y = forward_laplacian(f, sparsity)(x)
+                    out_shape = f(x).shape
+                    self.assertEqual(y.x.shape, out_shape)
+                    self.assert_allclose(y.x, f(x))
+                    # dense_array may be narrower than x.size if trailing
+                    # inputs are unused; pad it for comparison.
+                    dense_jac = np.asarray(y.jacobian.dense_array)
+                    pad = x.size - dense_jac.shape[0]
+                    dense_jac = np.pad(
+                        dense_jac, ((0, pad),) + ((0, 0),) * (dense_jac.ndim - 1)
+                    )
+                    jac = self.jacobian(f, x).reshape(*out_shape, x.size)
+                    self.assert_allclose(dense_jac, np.moveaxis(jac, -1, 0))
+                    self.assert_allclose(
+                        y.laplacian, self.laplacian(f, x).reshape(out_shape)
+                    )
+
+    def test_matmul_preferred_element_type(self):
+        # The sparse mul-sum path must honor dot_general's accumulation dtype.
+        # Seeded and scaled: bf16 rounding through exp is sensitive to magnitude.
+        x = (0.5 * np.random.default_rng(0).normal(size=(4, 2))).astype(jnp.bfloat16)
+
+        def f(x):
+            s = jnp.exp(jnp.matmul(x, jnp.swapaxes(x, -2, -1)))
+            return jax.lax.dot_general(
+                s, x, (((1,), (0,)), ((), ())), preferred_element_type=jnp.float32
+            )
+
+        for sparsity in [0, x.size]:
+            with self.subTest(sparsity=sparsity):
+                y = forward_laplacian(f, sparsity)(x)
+                self.assertEqual(y.x.dtype, jnp.float32)
+                self.assertEqual(y.jacobian.data.dtype, jnp.float32)
+                self.assertEqual(y.laplacian.dtype, jnp.float32)
+                ref = forward_laplacian(f, 0)(x.astype(jnp.float32))
+                self.assert_allclose(y.x, ref.x, rtol=5e-2)
+                self.assert_allclose(y.laplacian, ref.laplacian, rtol=5e-2)
+
     def test_dot(self):
         a = np.random.normal(size=(16,))
         b = np.random.normal(size=(16,))

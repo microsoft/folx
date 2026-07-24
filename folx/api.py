@@ -224,7 +224,10 @@ class FwdJacobian(NamedTuple):
 
             return FwdJacobian(add_jacobians(self.as_dense.data, other.as_dense.data))
         # If both are weak, we can keep them sparse
-        if (other.x0_idx == self.x0_idx).all():
+        assert self.x0_idx is not None and other.x0_idx is not None
+        if self.x0_idx.shape[JAC_DIM] == other.x0_idx.shape[JAC_DIM] and bool(
+            (other.x0_idx == self.x0_idx).all()
+        ):
             return FwdJacobian(
                 self.data + other.data,
                 np.broadcast_arrays(self.x0_idx, other.x0_idx)[0],

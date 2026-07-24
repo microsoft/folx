@@ -1,6 +1,6 @@
 [project]
 name = "folx"
-version = "0.2.22"
+version = "0.2.23"
 description = "Forward Laplacian for JAX"
 authors = [
     { name = "Nicholas Gao", email = "n.gao@tum.de" },
@@ -59,6 +59,7 @@ dev = [
     # that don't have it makes `--resolution lowest-direct` bump jax past its
     # production floor and produce a jax/jaxlib ABI mismatch. Use cuda12 for
     # older python (which still ships an old-jax floor) and cuda13 for 3.14.
+    "ipykernel>=7.3.0",
     "jax[cuda12]>=0.4.10; python_version < '3.13'",
     "jax[cuda12]>=0.4.34; python_version >= '3.13' and python_version < '3.14'",
     "jax[cuda13]>=0.7.2; python_version >= '3.14'",
