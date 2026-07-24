@@ -29,10 +29,63 @@ from .utils import (
     compact_repeated_dims_except,
     extend_jacobians,
     get_jacobian_for_reduction,
+    materialize_by_gather,
     np_concatenate_brdcast,
 )
 
 R = TypeVar('R', bound=PyTree[Array])
+
+
+def _factorized_dense_row_sum(data, x0_idx, red_axes, out_dim):
+    """Sums sparse Jacobian rows of a reduction into a dense Jacobian.
+
+    Each row is first reduced densely over the reduced axes where its target
+    index is constant; only the small varying remainder is materialized via
+    static gathers.
+
+    Args:
+        data: Jacobian rows, shape ``(k, *x_shape)``.
+        x0_idx: Static target indices, broadcastable to ``data.shape``.
+        red_axes: Reduced axes in ``x_shape`` coordinates.
+        out_dim: Number of dense output rows.
+    Returns:
+        Array of shape ``(out_dim, *kept_shape)`` or ``None`` if a remainder
+        has too high duplicate multiplicity.
+    """
+    k, *x_shape = data.shape
+    tmap = np.broadcast_to(x0_idx, data.shape)
+    x_ndim = len(x_shape)
+    kept = tuple(a for a in range(x_ndim) if a not in red_axes)
+    kept_size = np.prod([x_shape[a] for a in kept], dtype=int)
+
+    groups: dict[tuple[int, ...], list[int]] = {}
+    for kk in range(k):
+        row = tmap[kk]
+        sig = tuple(a for a in red_axes if not (np.take(row, [0], axis=a) == row).all())
+        groups.setdefault(sig, []).append(kk)
+
+    total = None
+    for sig, rows in groups.items():
+        const_ax = tuple(a for a in red_axes if a not in sig)
+        part = data[np.array(rows)].sum(tuple(a + 1 for a in const_ax))
+        t = tmap[np.array(rows)]
+        for a in sorted(const_ax, reverse=True):
+            t = np.take(t, 0, axis=a + 1)
+        # part/t: (g, *remaining axes in original order); split into kept | sig.
+        remaining = [a for a in range(x_ndim) if a not in const_ax]
+        kept_pos = [1 + remaining.index(a) for a in kept]
+        sig_pos = [1 + remaining.index(a) for a in sig]
+        order = (*kept_pos, 0, *sig_pos)
+        rows2 = len(rows) * np.prod([x_shape[a] for a in sig], dtype=int)
+        part = jnp.transpose(part, order).reshape(kept_size, rows2)
+        t = np.transpose(t, order).reshape(kept_size, rows2)
+        gathered = materialize_by_gather(part, t, out_dim)
+        if gathered is None:
+            return None
+        total = gathered if total is None else total + gathered
+    if total is None:
+        return None
+    return jnp.moveaxis(total, 1, 0).reshape(out_dim, *[x_shape[a] for a in kept])
 
 
 def sparse_sum_jvp(
@@ -81,8 +134,14 @@ def sparse_sum_jvp(
         logging.info(
             f'Output ({idx_out.shape[0]}) reaches sparsity threshold ({sparsity_threshold}). Switching to dense.'
         )
-        idx_out = None
         out_dim = np.max(idx) + 1
+        canonical_axes = tuple(a % x.ndim for a in axes)
+        out_jac = _factorized_dense_row_sum(
+            x_jac.data, x_jac.x0_idx, canonical_axes, out_dim
+        )
+        if out_jac is not None:
+            return y, FwdJacobian(out_jac, None), y_lapl
+        idx_out = None
     else:
         idx = np.argmax(idx[:, None] == idx_out, axis=1)
         out_dim = idx_out.shape[0]
@@ -103,9 +162,15 @@ def sparse_sum_jvp(
     jac_in_shape = jac.shape
     idx = idx.reshape(idx.shape[0], -1)
     jac = jac.reshape(*idx.shape[:2], -1)
-    # Compute output
-    seg_sum = functools.partial(jax.ops.segment_sum, num_segments=out_dim)
-    out_jac = jax.vmap(seg_sum, in_axes=1, out_axes=1)(jac, idx)
+    # Compute output: static gather when possible, runtime scatter otherwise.
+    gathered = None
+    if isinstance(idx, np.ndarray):
+        gathered = materialize_by_gather(jnp.moveaxis(jac, 0, 1), idx.T, out_dim)
+    if gathered is not None:
+        out_jac = jnp.moveaxis(gathered, 0, 1)
+    else:
+        seg_sum = functools.partial(jax.ops.segment_sum, num_segments=out_dim)
+        out_jac = jax.vmap(seg_sum, in_axes=1, out_axes=1)(jac, idx)
     # reshape back
     out_jac = out_jac.reshape(out_dim, *jac_in_shape[1:])
     out_jac = np.transpose(out_jac, inv_order)
@@ -236,12 +301,18 @@ def sparse_diag_jvp(
             axis=JAC_DIM,
             return_inverse=True,
         )
-        # Aggergate the corresponding jacobian results. Unfortunately,
-        # segment_sum can only be applied over the leading axis. So, we have to
-        # do some rearranging here.
-        grad_y = jax.ops.segment_sum(
-            grad_y, inv, num_segments=result_mask.shape[JAC_DIM]
-        )
+        # Merge rows sharing a mask. The mapping is static, so a gather plus
+        # per-group sums beats a runtime scatter (segment_sum).
+        inv = inv.reshape(-1)
+        parts = [
+            grad_y[group].sum(JAC_DIM, keepdims=True)
+            if group.size > 1
+            else grad_y[group]
+            for group in (
+                np.where(inv == o)[0] for o in range(result_mask.shape[JAC_DIM])
+            )
+        ]
+        grad_y = jnp.concatenate(parts, axis=JAC_DIM) if len(parts) > 1 else parts[0]
 
     # We need to broadcast the output mask to the shape of the gradient in case the operation
     # included some broadcasting, e.g., (10, 1) * (5,) -> (10, 5)

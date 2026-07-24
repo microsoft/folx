@@ -98,11 +98,22 @@ class FwdJacobian(NamedTuple):
             *idx.shape[len(indexed_axes) :],
         )
 
-        @jax.vmap
-        def aggregate(x, indices):
-            return jax.ops.segment_sum(x, indices, max_idx)
+        from .utils import materialize_by_gather
 
-        result = aggregate(x, idx).reshape(x_shape)
+        gathered = None
+        if isinstance(idx, np.ndarray):
+            if max_idx is None:
+                max_idx = int(idx.max()) + 1
+            gathered = materialize_by_gather(x, idx, max_idx)
+        if gathered is None:
+
+            @jax.vmap
+            def aggregate(x, indices):
+                return jax.ops.segment_sum(x, indices, max_idx)
+
+            gathered = aggregate(x, idx)
+
+        result = gathered.reshape(x_shape)
         result = jnp.transpose(result, inv_order)
         return result
 

@@ -68,6 +68,52 @@ def mark_varying_like(x: jax.Array, like: jax.Array) -> jax.Array:
     return x
 
 
+def materialize_by_gather(x, idx: np.ndarray, max_idx: int):
+    """Materializes Jacobian rows by a static gather instead of a runtime scatter.
+
+    Rows mapping to the same ``(position, target)`` occupy separate slots of a
+    static padded table and are summed after a single gather.
+
+    Args:
+        x: Jacobian rows of shape ``(p, k, *rest)``.
+        idx: Static target row per position and row, shape ``(p, k)``; ``-1``
+            marks rows that map nowhere.
+        max_idx: Number of output rows.
+    Returns:
+        Array of shape ``(p, max_idx, *rest)``, or ``None`` when the padded
+        table would be much larger than the input (skewed multiplicity), in
+        which case a runtime scatter is cheaper.
+    """
+    p, k = idx.shape
+    if k == 0:
+        return None
+    # Stable-sort rows by target per position; equal targets get consecutive
+    # slot numbers, defining a (p, max_idx, slots) gather table.
+    order = np.argsort(idx, axis=1, kind='stable')
+    sorted_t = np.take_along_axis(idx, order, axis=1)
+    first = np.concatenate(
+        [np.ones((p, 1), dtype=bool), sorted_t[:, 1:] != sorted_t[:, :-1]], axis=1
+    )
+    run_start = np.maximum.accumulate(np.where(first, np.arange(k)[None, :], 0), axis=1)
+    slot = np.arange(k)[None, :] - run_start
+    valid = sorted_t >= 0
+    n_slots = int(slot[valid].max()) + 1 if valid.any() else 0
+    if n_slots == 0:
+        return jnp.zeros((p, max_idx, *x.shape[2:]), dtype=x.dtype)
+    if max_idx * n_slots > 4 * k:
+        return None
+    take = np.full((p, max_idx, n_slots), -1, dtype=np.int64)
+    rows = np.broadcast_to(np.arange(p)[:, None], (p, k))
+    take[rows[valid], sorted_t[valid], slot[valid]] = order[valid]
+    trailing = (1,) * (x.ndim - 2)
+    take = take.reshape(p, max_idx * n_slots, *trailing)
+    keep = jnp.asarray(take >= 0)
+    gathered = jnp.take_along_axis(x, jnp.asarray(np.maximum(take, 0)), axis=1)
+    gathered = jnp.where(keep, gathered, 0)
+    gathered = gathered.reshape(p, max_idx, n_slots, *x.shape[2:])
+    return gathered.sum(2)
+
+
 def trace_of_product(mat1: Array, mat2: Array):
     """
     Computes the trace of the product of the given matrices.

@@ -70,6 +70,7 @@ def _dot_general_one_constant(
     dimension_numbers,
     precision,
     preferred_element_type,
+    sparsity_threshold: int,
 ) -> FwdLaplArray | None:
     """Direct dot_general fast path when exactly one operand is a FwdLaplArray.
 
@@ -80,9 +81,10 @@ def _dot_general_one_constant(
     dot_general kernel (no Python loop).
 
     Sparse Jacobian: the output's per-position dependency is the input's
-    x0_idx with the contract axes removed -- safe only when x0_idx is constant
-    along those axes (typical: a feature row depends on a fixed input subset
-    regardless of which channel/contract slot). Returns None if it isn't.
+    x0_idx with the contract axes removed. When x0_idx varies along the
+    contract axes (e.g. ``concat([diff, dist]) @ W``), the rows are first
+    aligned to the per-position union mask over those axes. Returns None if
+    that union exceeds the sparsity threshold.
     """
     h_is_lhs = isinstance(lhs, FwdLaplArray)
     h: FwdLaplArray = lhs if h_is_lhs else rhs  # type: ignore[assignment]
@@ -103,18 +105,29 @@ def _dot_general_one_constant(
             preferred_element_type=preferred_element_type,
         )
 
+    jac_data = h.jacobian.data
     if h.jacobian.weak:
         x0_idx = h.jacobian.x0_idx
         assert x0_idx is not None
         # x0_idx has axis 0 = JAC_DIM, so h's contract dims shift by 1 on data.
         data_contract = tuple(c + 1 for c in h_contract)
-        for ax in data_contract:
-            first = np.take(x0_idx, [0], axis=ax)
-            if not np.array_equal(x0_idx, np.broadcast_to(first, x0_idx.shape)):
+        varying = any(
+            not np.array_equal(
+                x0_idx, np.broadcast_to(np.take(x0_idx, [0], axis=ax), x0_idx.shape)
+            )
+            for ax in data_contract
+        )
+        if varying:
+            # Align rows to the per-position union mask over the contract axes.
+            from .utils import get_jacobian_for_reduction
+
+            (jac_data,), proj = get_jacobian_for_reduction((h.jacobian,), h_contract)
+            if proj.shape[0] > sparsity_threshold:
                 return None
-        proj = x0_idx
-        for ax in sorted(data_contract, reverse=True):
-            proj = np.take(proj, 0, axis=ax)
+        else:
+            proj = x0_idx
+            for ax in sorted(data_contract, reverse=True):
+                proj = np.take(proj, 0, axis=ax)
         # proj shape now: (k, *h's non-contract axes in h's original order).
         h_non_contract = [i for i in range(h.x.ndim) if i not in h_contract]
         h_brdcast = [i for i in h_non_contract if i not in h_batch]
@@ -140,13 +153,15 @@ def _dot_general_one_constant(
         proj = None
 
     h_x, h_lapl = h.x, h.laplacian
-    if h.jacobian.data.shape[JAC_DIM] >= 32:
+    if jac_data.shape[JAC_DIM] >= 128:
         # Keep XLA's dot merger from concatenating the small x/laplacian dots
         # into the large Jacobian dot: the resulting concatenate-rooted fusion
         # has much worse memory throughput than a plain elementwise fusion.
+        # Only worth it for wide Jacobians; below the threshold the merged
+        # dot is neutral-to-better.
         h_x, h_lapl = jax.lax.optimization_barrier((h_x, h_lapl))
     y_x = op(h_x)
-    y_data = jax.vmap(op, in_axes=0, out_axes=0)(h.jacobian.data)
+    y_data = jax.vmap(op, in_axes=0, out_axes=0)(jac_data)
     y_lapl = op(h_lapl)
     new_x0_idx = None if proj is None else np.broadcast_to(proj, y_data.shape)
     return FwdLaplArray(y_x, FwdJacobian(y_data, new_x0_idx), y_lapl)
@@ -173,7 +188,12 @@ def dot_general(
     # decomposition that the general path uses.
     if isinstance(lhs, FwdLaplArray) ^ isinstance(rhs, FwdLaplArray):
         fast = _dot_general_one_constant(
-            lhs, rhs, dimension_numbers, precision, preferred_element_type
+            lhs,
+            rhs,
+            dimension_numbers,
+            precision,
+            preferred_element_type,
+            sparsity_threshold,
         )
         if fast is not None:
             return fast

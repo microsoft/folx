@@ -376,6 +376,58 @@ def remove_zero_entries(
     return new_args, new_mat_idx, mask
 
 
+def _materialize_args_for_idx(lapl_args: FwdLaplArgs, out_idx: np.ndarray, in_axes):
+    """Aligns all Jacobians to the static index frame ``out_idx``.
+
+    Returns new args whose Jacobians are dense over the ``out_idx`` rows so
+    the JHJ computation needs no per-position index matching. ``out_idx`` has
+    the vmapped position dims only; each argument's reduced (``in_axes``)
+    dims are re-inserted as size-1 axes before broadcasting.
+    """
+    from .utils import broadcast_except
+
+    n_rows = out_idx.shape[JAC_DIM]
+    # out_idx comes on the squeezed position frame; recover the full frame
+    # (the broadcast of all args' shapes without their reduced axes).
+    reduced_shapes = [
+        tuple(np.delete(np.array(arr.x.shape), [a % arr.x.ndim for a in axes]))
+        for arr, axes in zip(lapl_args.arrays, in_axes)
+    ]
+    frame = np.broadcast_shapes(*reduced_shapes)
+    out_idx = out_idx.reshape(n_rows, *frame)
+
+    new_arrays = []
+    for arr, axes in zip(lapl_args.arrays, in_axes):
+        pos = {a % arr.x.ndim for a in axes}
+        n_lead = len(frame) - (arr.x.ndim - len(pos))
+        lead, core = frame[:n_lead], iter(frame[n_lead:])
+        arg_frame = [1 if a in pos else next(core) for a in range(arr.x.ndim)]
+        idx = out_idx.reshape(n_rows, *lead, *arg_frame)
+        jac = arr.jacobian
+        if jac.weak:
+            data = jac.materialize_for_idx(jac.get_index_mask(idx), n_rows)
+        else:
+            # Dense rows are indexed directly by x0 index.
+            idx, data = broadcast_except((idx, jac.data), axis=JAC_DIM)
+            take = jnp.asarray(np.maximum(idx, 0))
+            data = jnp.where(
+                jnp.asarray(idx >= 0),
+                jnp.take_along_axis(data, take, axis=JAC_DIM),
+                0,
+            )
+        # Materialization may expand broadcast dims; keep x/laplacian in sync
+        # for the downstream vmap bookkeeping.
+        pos_shape = data.shape[1:]
+        new_arrays.append(
+            FwdLaplArray(
+                jnp.broadcast_to(arr.x, pos_shape),
+                FwdJacobian.from_dense(data),
+                jnp.broadcast_to(arr.laplacian, pos_shape),
+            )
+        )
+    return FwdLaplArgs(tuple(new_arrays))
+
+
 def vmapped_jac_hessian_jac(
     fwd: ForwardFn,
     flags: FunctionFlags,
@@ -431,6 +483,19 @@ def vmapped_jac_hessian_jac(
         in_axes = jtu.tree_map(lambda _: -1, in_axes)
     else:
         mask = None
+
+    # For elementwise ops the index frame is static and per-position, so align
+    # all Jacobians to it once via static gathers here rather than matching
+    # masks at runtime inside the vmap. For dot-style ops (SPARSE_JHJ) the
+    # operands broadcast against each other and pre-materializing would blow
+    # them up across the full position grid, so those keep the vmapped path.
+    if (
+        out_idx is not None
+        and isinstance(out_idx, np.ndarray)
+        and FunctionFlags.SPARSE_JHJ not in flags
+    ):
+        lapl_args = _materialize_args_for_idx(lapl_args, out_idx, in_axes)
+        out_idx = None
 
     # Broadcast and flatten all arguments
     vmap_seq, (lapl_args, extra_args) = vmap_sequences_and_squeeze(
