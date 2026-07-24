@@ -210,6 +210,11 @@ class TestForwardLaplacian(LaplacianTestCase):
                 s, x, (((1,), (0,)), ((), ())), preferred_element_type=jnp.float32
             )
 
+        try:
+            jax.block_until_ready(jax.jit(f)(x))
+        except Exception as e:  # old jaxlib CPU backends lack bf16->f32 dots
+            self.skipTest(f'bf16 dot_general with f32 accumulation unsupported: {e}')
+
         for sparsity in [0, x.size]:
             with self.subTest(sparsity=sparsity):
                 y = forward_laplacian(f, sparsity)(x)
