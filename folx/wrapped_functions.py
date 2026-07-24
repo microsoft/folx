@@ -153,7 +153,7 @@ def _dot_general_one_constant(
         proj = None
 
     h_x, h_lapl = h.x, h.laplacian
-    if jac_data.shape[JAC_DIM] >= 128:
+    if jac_data.shape[JAC_DIM] >= 128 and hasattr(jax.lax, 'optimization_barrier'):
         # Keep XLA's dot merger from concatenating the small x/laplacian dots
         # into the large Jacobian dot: the resulting concatenate-rooted fusion
         # has much worse memory throughput than a plain elementwise fusion.
