@@ -139,9 +139,15 @@ def _dot_general_one_constant(
     else:
         proj = None
 
-    y_x = op(h.x)
+    h_x, h_lapl = h.x, h.laplacian
+    if h.jacobian.data.shape[JAC_DIM] >= 32:
+        # Keep XLA's dot merger from concatenating the small x/laplacian dots
+        # into the large Jacobian dot: the resulting concatenate-rooted fusion
+        # has much worse memory throughput than a plain elementwise fusion.
+        h_x, h_lapl = jax.lax.optimization_barrier((h_x, h_lapl))
+    y_x = op(h_x)
     y_data = jax.vmap(op, in_axes=0, out_axes=0)(h.jacobian.data)
-    y_lapl = op(h.laplacian)
+    y_lapl = op(h_lapl)
     new_x0_idx = None if proj is None else np.broadcast_to(proj, y_data.shape)
     return FwdLaplArray(y_x, FwdJacobian(y_data, new_x0_idx), y_lapl)
 
