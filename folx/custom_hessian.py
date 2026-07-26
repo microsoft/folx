@@ -2,10 +2,9 @@ import jax
 import jax.numpy as jnp
 
 from folx.ad import is_tree_complex
-from folx.vmap import batched_vmap
 
-from .api import JAC_DIM, Array, ExtraArgs, FwdLaplArgs, MergeFn
-from .utils import get_reduced_jacobians, trace_jac_jacT, trace_of_product
+from .api import Array, ExtraArgs, FwdLaplArgs, MergeFn
+from .utils import get_reduced_jacobians, trace_jac_jacT
 
 
 def slogdet_jac_hessian_jac(
@@ -22,34 +21,21 @@ def slogdet_jac_hessian_jac(
     # efficiently evaluated as vec(MA^-1). As we multiply the Hessian from
     # both sides with the jacobian tr(JHJ^T), this can be efficiently be done
     # as tr(J@A^-1 @ A^-1^T@J^T) where the inner @ is the outer product.
+    # The jacobian is kept with the jacobian dimension in front (JAC_DIM) and
+    # contracted via einsums; materializing per-element transposed copies or
+    # looping over leading dims costs more memory than it saves.
     assert len(args.x) == 1
     A = args.x[0]
     A_inv = jnp.linalg.inv(A)
     J = args.jacobian[0].construct_jac_for(materialize_idx)
-    J = jnp.moveaxis(J, JAC_DIM, -1)
-    leading_dims = A.shape[:-2]
-    x0_dim = J.shape[-1]
-
-    def elementwise(A_inv, J):
-        # We can do better and compute the trace more efficiently.
-        A_inv_J = jnp.einsum('ij,jdk->idk', A_inv, J)
-        trace = -trace_of_product(
-            jnp.transpose(A_inv_J, (1, 0, 2)).reshape(-1, x0_dim),
-            A_inv_J.reshape(-1, x0_dim),
-        )
-        return jnp.zeros((), dtype=trace.dtype), trace
-
-    A_inv = A_inv.reshape(-1, *A.shape[-2:])
-    J = J.reshape(-1, *J.shape[-3:])
-
-    # We can either use vmap or scan. Scan is slightly slower but uses less memory.
-    # Here we assume that we will in general encounter larger determinants rather than many.
-    signs, flat_out = batched_vmap(elementwise, 1)(A_inv, J)
-    sign_out, log_abs_out = signs.reshape(leading_dims), flat_out.reshape(leading_dims)
+    # J: [k, ..., i, j] with k the jacobian dim; M_k = A^-1 J_k.
+    M = jnp.einsum('...ij,k...jd->k...id', A_inv, J)
+    log_abs_out = -jnp.einsum('k...id,k...di->...', M, M)
 
     if is_tree_complex(A):
         # this is not the real Tr(JHJ^T) but a cached value we use later to compute the Tr(JHJ^T)
         return log_abs_out, log_abs_out.real
+    sign_out = jnp.zeros(A.shape[:-2], dtype=log_abs_out.dtype)
     return sign_out, log_abs_out.real
 
 
