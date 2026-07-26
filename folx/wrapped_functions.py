@@ -304,9 +304,7 @@ def dot_general(
 
     result = wrap_forward_laplacian(
         dot_last,
-        flags=FunctionFlags.DOT_PRODUCT
-        | FunctionFlags.JOIN_JVP
-        | FunctionFlags.SPARSE_JHJ,
+        flags=FunctionFlags.DOT_PRODUCT | FunctionFlags.SPARSE_JHJ,
         in_axes=-1,
     )((left_inp, right_inp), {}, sparsity_threshold=sparsity_threshold)
     return result

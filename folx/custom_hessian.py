@@ -21,9 +21,6 @@ def slogdet_jac_hessian_jac(
     # efficiently evaluated as vec(MA^-1). As we multiply the Hessian from
     # both sides with the jacobian tr(JHJ^T), this can be efficiently be done
     # as tr(J@A^-1 @ A^-1^T@J^T) where the inner @ is the outer product.
-    # The jacobian is kept with the jacobian dimension in front (JAC_DIM) and
-    # contracted via einsums; materializing per-element transposed copies or
-    # looping over leading dims costs more memory than it saves.
     assert len(args.x) == 1
     A = args.x[0]
     A_inv = jnp.linalg.inv(A)

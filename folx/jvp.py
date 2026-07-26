@@ -1,6 +1,6 @@
 import functools
 import logging
-from typing import Sequence, TypeVar
+from collections.abc import Sequence
 
 import jax
 import jax.numpy as jnp
@@ -20,7 +20,6 @@ from .api import (
     FwdLaplArgs,
     FwdLaplArray,
     MergeFn,
-    PyTree,
 )
 from .tree_utils import tree_concat, tree_expand, tree_take
 from .utils import (
@@ -33,8 +32,6 @@ from .utils import (
     materialize_by_gather,
     np_concatenate_brdcast,
 )
-
-R = TypeVar('R', bound=PyTree[Array])
 
 
 def _factorized_dense_row_sum(data, x0_idx, red_axes, out_dim):
@@ -191,7 +188,7 @@ def sparse_jvp(
     in_axes: Axes,
 ) -> tuple[Array, FwdJacobian, Array]:
     if not laplace_args.all_jacobian_weak:
-        return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
+        return dense_jvp(fwd, laplace_args, in_axes=in_axes)
 
     # Scatter ops (before the axes logic since operand, indices and updates
     # generally differ in ndim)
@@ -212,14 +209,14 @@ def sparse_jvp(
     if axes is None:
         ndims = set(x.ndim for x in laplace_args.x)
         if len(ndims) != 1:
-            return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
+            return dense_jvp(fwd, laplace_args, in_axes=in_axes)
         axes = tuple(range(next(iter(ndims))))
     if isinstance(axes, int):
         axes = (axes,)
 
     # Elementwise ops
     if axes == () or np.array(axes).size == 0:
-        return sparse_diag_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
+        return sparse_diag_jvp(fwd, laplace_args, in_axes=in_axes)
 
     # Summation
     if FunctionFlags.SUMMATION in flags:
@@ -230,7 +227,7 @@ def sparse_jvp(
         logging.info(
             f'Output ({out_mask.shape[JAC_DIM]}) reaches sparsity threshold ({sparsity_threshold}). Switching to dense.'
         )
-        return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
+        return dense_jvp(fwd, laplace_args, in_axes=in_axes)
 
     tangent = tree_concat(
         broadcast_except(
@@ -257,10 +254,10 @@ def sparse_jvp(
 
 
 def sparse_diag_jvp(
-    fwd: ForwardFn, laplace_args: FwdLaplArgs, flags: FunctionFlags, in_axes: Axes
+    fwd: ForwardFn, laplace_args: FwdLaplArgs, in_axes: Axes
 ) -> tuple[Array, FwdJacobian, Array]:
     if not laplace_args.all_jacobian_weak:
-        return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
+        return dense_jvp(fwd, laplace_args, in_axes=in_axes)
 
     y = fwd(*laplace_args.x)
     if (
@@ -337,12 +334,11 @@ def sparse_index_jvp(
     extra_args: ExtraArgs,
     merge: MergeFn,
     index_static_args: tuple | slice | None,
-    flags: FunctionFlags,
     in_axes: Axes,
 ) -> tuple[Array, FwdJacobian, Array]:
     # For indexing operations we have to also index the mask, here we can just apply the jacobian
     if not laplace_args.all_jacobian_weak:
-        return dense_jvp(merged_fwd, laplace_args, flags=flags, in_axes=in_axes)
+        return dense_jvp(merged_fwd, laplace_args, in_axes=in_axes)
 
     # Compute output mask
     try:
@@ -394,7 +390,7 @@ def sparse_index_jvp(
             'We will default to materializing everything. Here is the caught exception:\n'
             f'{e}'
         )
-        return dense_jvp(merged_fwd, laplace_args, flags=flags, in_axes=in_axes)
+        return dense_jvp(merged_fwd, laplace_args, in_axes=in_axes)
 
     tangent = tree_concat(
         [
@@ -490,7 +486,9 @@ def sparse_scatter_jvp(
     Statically computes the target operand position of every updates element,
     unions the dependencies of operand and updates per output position, and
     runs the scatter's JVP once per output mask row with all Jacobians aligned
-    to that mask.
+    to that mask. For scatter_add (linear with unit coefficients) the output
+    Jacobian is instead accumulated directly from the sparse input rows,
+    which avoids materializing the aligned tangents entirely.
 
     Args:
         fwd: Scatter forward function taking only the ``FwdLaplArray`` args.
@@ -507,7 +505,7 @@ def sparse_scatter_jvp(
     """
     operand, scatter_indices, updates = merge(laplace_args.arrays, extra_args)  # type: ignore
     if isinstance(scatter_indices, (FwdLaplArray, Tracer)):
-        return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
+        return dense_jvp(fwd, laplace_args, in_axes=in_axes)
     # scatter (set) overwrites operand entries; add/min/max keep them varying.
     is_set = FunctionFlags.INDEXING in flags
     is_add = fwd.__name__ == 'scatter_add'
@@ -530,7 +528,7 @@ def sparse_scatter_jvp(
             'We will default to materializing everything. Here is the caught exception:\n'
             f'{e}'
         )
-        return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
+        return dense_jvp(fwd, laplace_args, in_axes=in_axes)
 
     # Union the input dependencies per output position.
     pos_list, dep_list = [], []
@@ -563,13 +561,19 @@ def sparse_scatter_jvp(
     max_out = int(counts.max()) if counts.size > 0 else 0
     # scatter_add is linear with unit coefficients, so the output Jacobian can
     # be accumulated straight from the sparse input rows (k_upd many) instead
-    # of aligning max_out tangent rows per argument.
+    # of aligning max_out tangent rows per argument. Only worth it when the
+    # saved work is substantial; for small scatters the aligned path fuses
+    # into fewer kernels.
     k_upd = (
         updates.jacobian.mask.shape[JAC_DIM]
         if isinstance(updates, FwdLaplArray)
         else max_out
     )
-    use_direct = is_add and isinstance(updates, FwdLaplArray) and k_upd < max_out
+    use_direct = (
+        is_add
+        and isinstance(updates, FwdLaplArray)
+        and (max_out - k_upd) * int(np.prod(updates.shape, dtype=int)) > 2**16
+    )
     densify = max_out > sparsity_threshold
     if densify:
         # Densifying the small scatter output is often much cheaper than
@@ -585,7 +589,7 @@ def sparse_scatter_jvp(
             logging.info(
                 f'Scatter: Output ({max_out}) reaches sparsity threshold ({sparsity_threshold}). Switching to dense.'
             )
-            return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
+            return dense_jvp(fwd, laplace_args, in_axes=in_axes)
         logging.info(
             f'Scatter: Output ({max_out}) reaches sparsity threshold ({sparsity_threshold}). Densifying after the scatter.'
         )
@@ -665,23 +669,8 @@ def sparse_scatter_jvp(
     grad_y = tree_take(y_tangent, slice(None, -1), axis=JAC_DIM)
     lapl_y = tree_take(y_tangent, -1, axis=JAC_DIM)
 
-    def to_jacobian(g):
-        jac = FwdJacobian(g, out_mask)
-        return jac.as_dense if densify else jac
-
     grad_y = jtu.tree_map(to_jacobian, grad_y)
     return y, grad_y, lapl_y
-
-
-def dense_joint_jvp(
-    fwd: ForwardFn,
-    laplace_args: FwdLaplArgs,
-) -> tuple[Array, FwdJacobian, Array]:
-    # The jacobian and laplacian tangents share the primal computation via
-    # linearize. Evaluating them in two calls avoids concatenating them into
-    # a single tangent buffer, which costs a full jacobian-sized copy; the
-    # extra laplacian call is 1/x0_dim of the jacobian work.
-    return dense_split_jvp(fwd, laplace_args)
 
 
 def dense_split_jvp(
@@ -711,14 +700,11 @@ def dense_elementwise_jvp(
 def dense_jvp(
     fwd: ForwardFn,
     laplace_args: FwdLaplArgs,
-    flags: FunctionFlags,
     in_axes: Axes,
 ) -> tuple[Array, FwdJacobian, Array]:
     # General implementation. This will always materialize the full Jacobian.
     if in_axes == () and len(laplace_args) == 1:
         y, grad_y, lapl_y = dense_elementwise_jvp(fwd, laplace_args)
-    elif FunctionFlags.JOIN_JVP in flags:
-        y, grad_y, lapl_y = dense_joint_jvp(fwd, laplace_args)
     else:
         y, grad_y, lapl_y = dense_split_jvp(fwd, laplace_args)
     grad_y = jtu.tree_map(FwdJacobian.from_dense, grad_y)
@@ -741,7 +727,7 @@ def get_jvp_function(
 
     def parallel_jvp(args: FwdLaplArgs, kwargs):
         if not args.all_jacobian_weak:
-            return dense_jvp(merged_fwd, args, flags, in_axes)
+            return dense_jvp(merged_fwd, args, in_axes)
         if FunctionFlags.INDEXING in flags:
             return sparse_index_jvp(
                 fwd,
@@ -750,7 +736,6 @@ def get_jvp_function(
                 extra_args,
                 merge,
                 index_static_args,
-                flags=flags,
                 in_axes=in_axes,
             )
         return sparse_jvp(
@@ -786,7 +771,7 @@ def get_jvp_function(
                 # logging.info(f'{vmapped_jvp.__name__} {args.arrays[0].jacobian.data.shape}')
                 # If any jacobian is dense, we just switch all jacobians to dense.
                 if not args.all_jacobian_weak:
-                    return dense_jvp(merged_fwd, args, flags, in_axes)
+                    return dense_jvp(merged_fwd, args, in_axes)
 
                 # Special case for index operation
                 return sparse_jvp(
