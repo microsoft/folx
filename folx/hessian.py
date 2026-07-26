@@ -452,13 +452,16 @@ def vmapped_jac_hessian_jac(
     # sparse-row axis or the dense-input axis respectively, both equal to the
     # sum of squares of |∇y[i]|). Skips find_out_idx, the per-element vmap stack,
     # and the full Hessian materialization that JHJ_via_hessian would otherwise
-    # do for inp_dim > jac_dim. Bail if a sparse mask has duplicates --
+    # do for inp_dim > jac_dim. Only valid for ops registered as elementwise
+    # (empty in_axes): a matching output shape alone does not imply a diagonal
+    # Hessian (e.g. cumprod). Bail if a sparse mask has duplicates --
     # sum_l J_full[l, i]^2 = sum_k J[k, i]^2 requires unique x0_idx values per
     # output position.
     if (
         custom_jac_hessian_jac is None
         and int(flags) == int(FunctionFlags.GENERAL)
         and len(lapl_args.arrays) == 1
+        and all(ax == () for ax in in_axes)
         and isinstance(out, Array)
         and not _has_duplicate_x0_idx(lapl_args.arrays[0].jacobian.x0_idx)
     ):

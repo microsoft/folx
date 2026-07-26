@@ -12,6 +12,11 @@ try:
 except ImportError:
     from jax.core import Primitive  # type: ignore[import-error]
 
+try:
+    from jax.extend.core.primitives import add_jaxvals_p as add_any_p
+except ImportError:
+    from jax._src.ad_util import add_any_p  # type: ignore[import-error]
+
 from folx.ad import is_tree_complex
 
 from .api import (
@@ -435,6 +440,11 @@ _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
     jax.lax.sub_p: wrap_forward_laplacian(
         jax.lax.sub, flags=FunctionFlags.LINEAR, in_axes=()
     ),
+    # add_any is emitted by JAX's AD machinery (e.g., jax.grad inside the
+    # target function) and is semantically identical to add.
+    add_any_p: wrap_forward_laplacian(
+        jax.lax.add, flags=FunctionFlags.LINEAR, in_axes=()
+    ),
     jax.lax.mul_p: wrap_forward_laplacian(
         jax.lax.mul, flags=FunctionFlags.MULTIPLICATION, in_axes=()
     ),
@@ -483,6 +493,40 @@ _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
     jax.lax.cos_p: wrap_forward_laplacian(jax.lax.cos, in_axes=()),
     jax.lax.sin_p: wrap_forward_laplacian(jax.lax.sin, in_axes=()),
     jax.lax.tan_p: wrap_forward_laplacian(jax.lax.tan, in_axes=()),
+    jax.lax.sinh_p: wrap_forward_laplacian(jax.lax.sinh, in_axes=()),
+    jax.lax.cosh_p: wrap_forward_laplacian(jax.lax.cosh, in_axes=()),
+    jax.lax.asinh_p: wrap_forward_laplacian(jax.lax.asinh, in_axes=()),
+    jax.lax.acosh_p: wrap_forward_laplacian(jax.lax.acosh, in_axes=()),
+    jax.lax.atanh_p: wrap_forward_laplacian(jax.lax.atanh, in_axes=()),
+    jax.lax.erf_p: wrap_forward_laplacian(jax.lax.erf, in_axes=()),
+    jax.lax.erfc_p: wrap_forward_laplacian(jax.lax.erfc, in_axes=()),
+    jax.lax.erf_inv_p: wrap_forward_laplacian(jax.lax.erf_inv, in_axes=()),
+    jax.lax.cbrt_p: wrap_forward_laplacian(jax.lax.cbrt, in_axes=()),
+    jax.lax.lgamma_p: wrap_forward_laplacian(jax.lax.lgamma, in_axes=()),
+    jax.lax.digamma_p: wrap_forward_laplacian(jax.lax.digamma, in_axes=()),
+    # Piecewise linear: linear jvp, zero Hessian almost everywhere.
+    jax.lax.clamp_p: wrap_forward_laplacian(
+        jax.lax.clamp, flags=FunctionFlags.LINEAR, in_axes=()
+    ),
+    jax.lax.rem_p: wrap_forward_laplacian(
+        jax.lax.rem, flags=FunctionFlags.LINEAR, in_axes=()
+    ),
+    jax.lax.complex_p: wrap_forward_laplacian(
+        jax.lax.complex, flags=FunctionFlags.LINEAR, in_axes=()
+    ),
+    # Piecewise constant: zero derivative almost everywhere.
+    jax.lax.floor_p: warp_without_fwd_laplacian(jax.lax.floor),
+    jax.lax.ceil_p: warp_without_fwd_laplacian(jax.lax.ceil),
+    jax.lax.round_p: warp_without_fwd_laplacian(jax.lax.round),
+    jax.lax.argmax_p: warp_without_fwd_laplacian(jax.lax.argmax_p.bind),
+    jax.lax.argmin_p: warp_without_fwd_laplacian(jax.lax.argmin_p.bind),
+    jax.lax.cummax_p: wrap_forward_laplacian(
+        jax.lax.cummax, flags=FunctionFlags.LINEAR
+    ),
+    jax.lax.cummin_p: wrap_forward_laplacian(
+        jax.lax.cummin, flags=FunctionFlags.LINEAR
+    ),
+    jax.lax.cumprod_p: wrap_forward_laplacian(jax.lax.cumprod),
     jax.lax.broadcast_in_dim_p: wrap_forward_laplacian(
         jax.lax.broadcast_in_dim_p.bind,
         flags=FunctionFlags.INDEXING,
@@ -506,6 +550,20 @@ _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
         name='concatenate',
         index_static_args=(),
     ),
+    # Every output element of pad is either an operand element or the padding
+    # value, so it is an indexing op even for varying padding values.
+    jax.lax.pad_p: wrap_forward_laplacian(
+        jax.lax.pad_p.bind,
+        flags=FunctionFlags.INDEXING,
+        name='pad',
+        index_static_args=(),
+    ),
+    jax.lax.dynamic_update_slice_p: wrap_forward_laplacian(
+        jax.lax.dynamic_update_slice_p.bind,
+        flags=FunctionFlags.INDEXING,
+        name='dynamic_update_slice',
+        index_static_args=slice(2, None),
+    ),
     jax.lax.select_n_p: wrap_forward_laplacian(
         jax.lax.select_n, flags=FunctionFlags.INDEXING, index_static_args=(0,)
     ),
@@ -527,26 +585,28 @@ _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
     jax.lax.min_p: wrap_forward_laplacian(
         jax.lax.min, in_axes=(), flags=FunctionFlags.LINEAR
     ),
+    # Every output element of scatter (set) is either an operand or an updates
+    # element, so the sparsity mask propagates like an indexing op with the
+    # scatter indices as static arguments.
     jax.lax.scatter_p: wrap_forward_laplacian(
         jax.lax.scatter_p.bind,
         flags=FunctionFlags.INDEXING | FunctionFlags.SCATTER,
         name='scatter',
+        index_static_args=(1,),
     ),
-    # The current scatter implementation is frequently slower than the naive approach.
-    # TODO: add scatter flag back in once the scatter implementation improves.
     jax.lax.scatter_add_p: wrap_forward_laplacian(
         jax.lax.scatter_add_p.bind,
-        flags=FunctionFlags.LINEAR,
+        flags=FunctionFlags.LINEAR | FunctionFlags.SCATTER,
         name='scatter_add',
     ),
     jax.lax.scatter_max_p: wrap_forward_laplacian(
         jax.lax.scatter_max_p.bind,
-        flags=FunctionFlags.LINEAR,
+        flags=FunctionFlags.LINEAR | FunctionFlags.SCATTER,
         name='scatter_max',
     ),
     jax.lax.scatter_min_p: wrap_forward_laplacian(
         jax.lax.scatter_min_p.bind,
-        flags=FunctionFlags.LINEAR,
+        flags=FunctionFlags.LINEAR | FunctionFlags.SCATTER,
         name='scatter_min',
     ),
     jax.lax.stop_gradient_p: warp_without_fwd_laplacian(jax.lax.stop_gradient),
@@ -640,5 +700,37 @@ if hasattr(jax.lax, 'split_p'):
             jax.lax.split,
             flags=FunctionFlags.INDEXING,
             index_static_args=(1, 2),
+        ),
+    )
+if hasattr(jax.lax, 'exp2_p'):
+    register_function(jax.lax.exp2_p, wrap_forward_laplacian(jax.lax.exp2, in_axes=()))
+if hasattr(jax.lax, 'copy_p'):
+    register_function(jax.lax.copy_p, wrap_elementwise(lambda x: x))
+if hasattr(jax.lax, 'stack_p'):
+    register_function(
+        jax.lax.stack_p,
+        wrap_forward_laplacian(
+            jax.lax.stack_p.bind,
+            flags=FunctionFlags.INDEXING,
+            name='stack',
+            index_static_args=(),
+        ),
+    )
+if hasattr(jax.lax, 'unstack_p'):
+    register_function(
+        jax.lax.unstack_p,
+        wrap_forward_laplacian(
+            jax.lax.unstack_p.bind,
+            flags=FunctionFlags.INDEXING,
+            name='unstack',
+        ),
+    )
+if hasattr(jax.lax, 'tile_p'):
+    register_function(
+        jax.lax.tile_p,
+        wrap_forward_laplacian(
+            jax.lax.tile_p.bind,
+            flags=FunctionFlags.INDEXING,
+            name='tile',
         ),
     )

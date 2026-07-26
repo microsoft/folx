@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
+from jax.core import Tracer
 
 from .ad import vjp
 from .api import (
@@ -192,6 +193,20 @@ def sparse_jvp(
     if not laplace_args.all_jacobian_weak:
         return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
 
+    # Scatter ops (before the axes logic since operand, indices and updates
+    # generally differ in ndim)
+    if FunctionFlags.SCATTER in flags:
+        return sparse_scatter_jvp(
+            fwd,
+            laplace_args,
+            extra_args,
+            merge,
+            flags=flags,
+            in_axes=in_axes,
+            kwargs=kwargs,
+            sparsity_threshold=sparsity_threshold,
+        )
+
     if axes is None:
         axes = kwargs.get('axes')
     if axes is None:
@@ -205,19 +220,6 @@ def sparse_jvp(
     # Elementwise ops
     if axes == () or np.array(axes).size == 0:
         return sparse_diag_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
-
-    # Scatter ops
-    if FunctionFlags.SCATTER in flags:
-        return sparse_scatter_jvp(
-            fwd,
-            laplace_args,
-            extra_args,
-            merge,
-            flags=flags,
-            in_axes=in_axes,
-            kwargs=kwargs,
-            sparsity_threshold=sparsity_threshold,
-        )
 
     # Summation
     if FunctionFlags.SUMMATION in flags:
@@ -415,6 +417,64 @@ def sparse_index_jvp(
     return y, grad_y, lapl_y
 
 
+def _scatter_target_positions(
+    op_shape: tuple[int, ...],
+    scatter_indices: Array,
+    updates_shape: tuple[int, ...],
+    kwargs,
+) -> np.ndarray:
+    """Computes the flat operand position written by each updates element.
+
+    Gathers per-dimension operand coordinates through the VJP of a scatter-add
+    with the same indices and dimension numbers, which is exactly the
+    transposed gather. This delegates all scatter semantics (window mapping,
+    batching dims, out-of-bounds handling) to JAX and is evaluated at compile
+    time.
+
+    Args:
+        op_shape: Shape of the scatter operand.
+        scatter_indices: Static scatter index array.
+        updates_shape: Shape of the scatter updates.
+        kwargs: Parameters of the scatter primitive.
+    Returns:
+        Integer array of shape ``updates_shape`` with flat operand positions;
+        ``-1`` marks dropped (out-of-bounds) updates.
+    """
+    with jax.ensure_compile_time_eval():
+
+        def scatter_zeros(u):
+            return jax.lax.scatter_add(
+                jnp.zeros(op_shape, jnp.float32),
+                scatter_indices,
+                u,
+                kwargs['dimension_numbers'],
+                indices_are_sorted=kwargs.get('indices_are_sorted', False),
+                unique_indices=kwargs.get('unique_indices', False),
+                mode=kwargs.get('mode'),
+            )
+
+        _, vjp_fn = jax.vjp(scatter_zeros, jnp.zeros(updates_shape, jnp.float32))
+        # First channel detects dropped updates, the rest carry coordinates.
+        channels = [jnp.ones(op_shape, jnp.float32)]
+        for d, size in enumerate(op_shape):
+            shape = [1] * len(op_shape)
+            shape[d] = size
+            channels.append(
+                jnp.broadcast_to(
+                    jnp.arange(size, dtype=jnp.float32).reshape(shape), op_shape
+                )
+            )
+        gathered = np.asarray(jax.vmap(lambda c: vjp_fn(c)[0])(jnp.stack(channels)))
+    valid = gathered[0] > 0.5
+    positions = np.full(updates_shape, -1, dtype=np.int64)
+    if len(op_shape) == 0:
+        positions[valid] = 0
+        return positions
+    coords = tuple(np.round(c[valid]).astype(np.int64) for c in gathered[1:])
+    positions[valid] = np.ravel_multi_index(coords, op_shape)
+    return positions
+
+
 def sparse_scatter_jvp(
     fwd: ForwardFn,
     laplace_args: FwdLaplArgs,
@@ -425,77 +485,137 @@ def sparse_scatter_jvp(
     kwargs,
     sparsity_threshold: int,
 ) -> tuple[Array, FwdJacobian, Array]:
-    updates: FwdLaplArray
+    """JVP for scatter ops (set/add/min/max) with sparse Jacobians.
+
+    Statically computes the target operand position of every updates element,
+    unions the dependencies of operand and updates per output position, and
+    runs the scatter's JVP once per output mask row with all Jacobians aligned
+    to that mask.
+
+    Args:
+        fwd: Scatter forward function taking only the ``FwdLaplArray`` args.
+        laplace_args: The ``FwdLaplArray`` arguments (operand and/or updates).
+        extra_args: Constant arguments.
+        merge: Function merging ``laplace_args`` and ``extra_args`` into
+            ``(operand, scatter_indices, updates)``.
+        flags: Function flags of the scatter op.
+        in_axes: Input axes of the op.
+        kwargs: Parameters of the scatter primitive.
+        sparsity_threshold: Maximum sparse output rows before densifying.
+    Returns:
+        Tuple of output, output Jacobian and output Laplacian.
+    """
     operand, scatter_indices, updates = merge(laplace_args.arrays, extra_args)  # type: ignore
-    if isinstance(scatter_indices, FwdLaplArray):
+    if isinstance(scatter_indices, (FwdLaplArray, Tracer)):
         return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
-    if not isinstance(updates, FwdLaplArray) and FunctionFlags.LINEAR in flags:
-        # operand must be a fwdlapl array by exclusion since at least one has to be.
+    # scatter (set) overwrites operand entries; add/min/max keep them varying.
+    is_set = FunctionFlags.INDEXING in flags
+    if not isinstance(updates, FwdLaplArray) and fwd.__name__ == 'scatter_add':
+        # Adding constants only shifts the output; the operand must be a
+        # FwdLaplArray by exclusion and its Jacobian and Laplacian pass through.
         y: Array = fwd(*laplace_args.x)  # type: ignore
-        grad_y: FwdJacobian = operand.jacobian  # type: ignore
-        lapl_y: Array = operand.laplacian  # type: ignore
-        return y, grad_y, lapl_y
+        return y, operand.jacobian, operand.laplacian  # type: ignore
+
+    op_shape = tuple(operand.shape)
+    op_size = int(np.prod(op_shape, dtype=int))
+    try:
+        target_pos = _scatter_target_positions(
+            op_shape, scatter_indices, tuple(updates.shape), kwargs
+        )
+    except Exception as e:
+        logging.warning(
+            f'Could not compute static scatter positions for {fwd.__name__}. '
+            'This is most likely due to data dependent indexing. '
+            'We will default to materializing everything. Here is the caught exception:\n'
+            f'{e}'
+        )
+        return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
+
+    # Union the input dependencies per output position.
+    pos_list, dep_list = [], []
+    if isinstance(updates, FwdLaplArray):
+        mask = updates.jacobian.mask
+        mask = np.broadcast_to(mask, (mask.shape[JAC_DIM], *updates.shape))
+        tpos = np.broadcast_to(target_pos, mask.shape)
+        select = (mask >= 0) & (tpos >= 0)
+        pos_list.append(tpos[select])
+        dep_list.append(mask[select])
     if isinstance(operand, FwdLaplArray):
+        mask = operand.jacobian.mask
+        mask = np.broadcast_to(mask, (mask.shape[JAC_DIM], *op_shape))
+        keep = mask >= 0
+        if is_set:
+            # Overwritten positions no longer depend on the operand.
+            overwritten = np.zeros((op_size,), dtype=bool)
+            overwritten[target_pos[target_pos >= 0]] = True
+            keep &= ~overwritten.reshape(op_shape)
+        pos = np.broadcast_to(np.arange(op_size).reshape(op_shape), mask.shape)
+        pos_list.append(pos[keep])
+        dep_list.append(mask[keep])
+
+    pos = np.concatenate(pos_list).astype(np.int64)
+    dep = np.concatenate(dep_list).astype(np.int64)
+    n_dep = int(dep.max()) + 1 if dep.size > 0 else 1
+    unique_keys = np.unique(pos * n_dep + dep)
+    pos_u, dep_u = unique_keys // n_dep, unique_keys % n_dep
+    counts = np.bincount(pos_u, minlength=op_size)
+    max_out = int(counts.max()) if counts.size > 0 else 0
+    densify = max_out > sparsity_threshold
+    if densify:
+        # Densifying the small scatter output is often much cheaper than
+        # materializing the inputs' dense Jacobians before the scatter.
+        n_dense = max(a.jacobian.max_n for a in laplace_args.arrays) + 1
+        upd_size = int(np.prod(updates.shape, dtype=int))
+        sparse_cost = (max_out + 1) * (upd_size + op_size) + n_dense * op_size
+        dense_cost = n_dense * (upd_size + op_size)
+        if sparse_cost >= dense_cost:
+            logging.info(
+                f'Scatter: Output ({max_out}) reaches sparsity threshold ({sparsity_threshold}). Switching to dense.'
+            )
+            return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
         logging.info(
-            'Scatter: operation on operand not supported. At the moment only segment sums are supported.'
+            f'Scatter: Output ({max_out}) reaches sparsity threshold ({sparsity_threshold}). Densifying after the scatter.'
         )
-        return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
+    max_out = max(max_out, 1)
+    out_mask_flat = np.full((max_out, op_size), -1, dtype=np.int32)
+    group_starts = np.concatenate([[0], np.cumsum(counts)[:-1]])
+    slots = np.arange(pos_u.size) - group_starts[pos_u]
+    out_mask_flat[slots, pos_u] = dep_u
+    out_mask = out_mask_flat.reshape(max_out, *op_shape)
 
-    dimension_numbers: jax.lax.ScatterDimensionNumbers = kwargs['dimension_numbers']
-    if (
-        dimension_numbers.inserted_window_dims != (0,)
-        or dimension_numbers.scatter_dims_to_operand_dims != (0,)
-        or dimension_numbers.update_window_dims != ()
-    ):
-        logging.info(
-            'Scatter: dimension numbers not supported. At the moment only segment sums are supported.'
-        )
-        return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
+    # Identify which laplace args are the operand and the updates.
+    arg_ids = merge(tuple(range(len(laplace_args))), (None,) * len(extra_args))  # type: ignore
 
-    n = updates.jacobian.max_n + 1
-    with jax.ensure_compile_time_eval():
-        one_hot_mask = jax.nn.one_hot(
-            updates.jacobian.x0_idx, n, axis=-1, dtype=jnp.int32
-        ).sum(0)
-        out_mask = np.array(jax.ops.segment_sum(one_hot_mask, scatter_indices[:, 0]))
-        max_out = np.sum(out_mask.astype(bool), axis=-1).max()
-        out_mask = np.where(
-            out_mask > 0, out_mask * jnp.arange(n), np.iinfo(np.int32).max
+    # Align every argument's Jacobian rows with the output mask rows.
+    tangents = []
+    for i, arr in enumerate(laplace_args.arrays):
+        if i == arg_ids[2]:  # updates
+            outputs = out_mask_flat[:, np.maximum(target_pos, 0)]
+            outputs = np.where(target_pos >= 0, outputs, -2)
+        else:  # operand
+            outputs = out_mask
+        grad_tan = arr.jacobian.materialize_for_idx(
+            arr.jacobian.get_index_mask(outputs), max_idx=max_out
         )
-        unique_fn = jax.vmap(functools.partial(jnp.unique, size=max_out, fill_value=-1))
-        out_mask = unique_fn(out_mask.reshape(-1, n)).T.reshape(
-            max_out, *out_mask.shape[:-1]
+        grad_tan = jnp.broadcast_to(grad_tan, (max_out, *arr.shape))
+        lapl = jnp.broadcast_to(arr.laplacian, arr.shape)
+        tangents.append(
+            jnp.concatenate([grad_tan, jnp.expand_dims(lapl, JAC_DIM)], axis=JAC_DIM)
         )
-        out_mask = np.where(out_mask == np.iinfo(np.int32).max, -1, out_mask)
-    if out_mask.shape[JAC_DIM] > sparsity_threshold:
-        logging.info(
-            f'Scatter: Output ({out_mask.shape[JAC_DIM]}) reaches sparsity threshold ({sparsity_threshold}). Switching to dense.'
-        )
-        return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
-
-    grad_tan = updates.jacobian.materialize_for_idx(
-        updates.jacobian.get_index_mask(
-            jnp.take(out_mask, scatter_indices[:, 0], axis=1)
-        ),
-        max_idx=max_out,
-    )
-
-    tangent = tree_concat(
-        broadcast_except(
-            [(grad_tan,), tree_expand(laplace_args.laplacian, axis=JAC_DIM)], JAC_DIM
-        ),
-        axis=JAC_DIM,
-    )
 
     @functools.partial(jax.vmap, in_axes=0, out_axes=(None, 0))
     def jvp(tangents):
         return jax.jvp(fwd, laplace_args.x, tangents)
 
-    y, y_tangent = jvp(tangent)
+    y, y_tangent = jvp(tuple(tangents))
     grad_y = tree_take(y_tangent, slice(None, -1), axis=JAC_DIM)
     lapl_y = tree_take(y_tangent, -1, axis=JAC_DIM)
 
-    grad_y = jtu.tree_map(FwdJacobian, grad_y, out_mask)
+    def to_jacobian(g):
+        jac = FwdJacobian(g, out_mask)
+        return jac.as_dense if densify else jac
+
+    grad_y = jtu.tree_map(to_jacobian, grad_y)
     return y, grad_y, lapl_y
 
 
@@ -658,11 +778,15 @@ def get_jvp_function(
 
     def jvp(args: FwdLaplArgs, kwargs) -> tuple[Array, FwdJacobian, Array]:
         # If everything is dense, we do it in parallel. Otherwise, we call the simpler code
-        # if only a single argument has a jacobian or it is an elementwise/indexing operation.
+        # if only a single argument has a jacobian or it is an elementwise/indexing/scatter
+        # operation.
         if (not args.any_jacobian_weak) or (
             args.all_jacobian_weak
             and (
-                (FunctionFlags.INDEXING in flags) or (in_axes == ()) or (len(args) == 1)
+                (FunctionFlags.INDEXING in flags)
+                or (FunctionFlags.SCATTER in flags)
+                or (in_axes == ())
+                or (len(args) == 1)
             )
         ):
             return parallel_jvp(args, kwargs)

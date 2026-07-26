@@ -178,6 +178,10 @@ class TestForwardLaplacian(LaplacianTestCase):
             lambda x: jnp.einsum('nk,mk->nm', x, jnp.sin(x[:1])),  # (5, 1)
             lambda x: jnp.einsum('nk,mk->nm', x[:1], jnp.sin(x)),  # (1, 5)
             lambda x: jnp.einsum('k,mk->m', x[0], jnp.sin(x[:k])),  # (k,)
+            # batch-last message aggregation (FiRE/MPNN pattern)
+            lambda x: jnp.einsum(
+                'ijh,jh->ih', jnp.sin(x[:, None, :] * x[None, :, :]), jnp.cos(x)
+            ),
         ]
         for i, f in enumerate(cases):
             for sparsity in [0, x.size]:
@@ -483,3 +487,128 @@ class TestForwardLaplacian(LaplacianTestCase):
         y_fwd = forward_laplacian(f, sparsity_threshold=1)(x)
         assert y_fwd[0].jacobian.data.shape == (1, 8)
         assert y_fwd[1].jacobian.data.shape == (1, 8)
+
+    def check_forward_laplacian(self, f, x, sparsity):
+        def flat_f(z):
+            return f(z).reshape(-1)
+
+        y = forward_laplacian(f, sparsity)(x)
+        self.assert_allclose(y.x, f(x))
+        jac = np.moveaxis(np.asarray(y.jacobian.dense_array), 0, -1)
+        jac = jac.reshape(y.x.size, -1)
+        expected = self.jacobian(flat_f, x)
+        # The dense jacobian is truncated at the highest referenced input.
+        self.assert_allclose(jac, expected[:, : jac.shape[1]])
+        self.assert_allclose(expected[:, jac.shape[1] :], 0)
+        self.assert_allclose(np.asarray(y.laplacian).reshape(-1), self.laplacian(f, x))
+        return y
+
+    def test_pad(self):
+        # https://github.com/microsoft/folx/issues/27
+        x = np.random.randn(6)
+        cases = [
+            lambda z: jnp.pad(z.reshape(2, 3), ((1, 0), (0, 2))),
+            lambda z: jax.lax.pad(z.reshape(2, 3), 7.0, ((1, 0, 1), (0, 2, 0))),
+            lambda z: jax.lax.pad(z[:5], z[5], ((2, 1, 1),)),  # varying pad value
+            lambda z: jax.lax.pad(z, 0.0, ((-1, -2, 0),)),  # negative padding
+        ]
+        for i, f in enumerate(cases):
+            for sparsity in [0, x.size]:
+                with self.subTest(case=i, sparsity=sparsity):
+                    y = self.check_forward_laplacian(f, x, sparsity)
+                    if sparsity:
+                        self.assertTrue(y.is_jacobian_weak)
+
+    def test_add_any(self):
+        # jax.grad inside the function emits the add_any primitive
+        x = np.random.randn(6)
+
+        def f(z):
+            return jax.grad(lambda y: jnp.sin(y).sum() + (y**2).sum())(z) * z
+
+        for sparsity in [0, x.size]:
+            with self.subTest(sparsity=sparsity):
+                self.check_forward_laplacian(f, x, sparsity)
+
+    def test_elementwise_real(self):
+        # Elementwise primitives that only support real inputs
+        functions = [
+            jax.scipy.special.erf,
+            jax.scipy.special.erfc,
+            lambda z: jax.scipy.special.erfinv(jnp.tanh(z)),
+            jnp.sinh,
+            jnp.cosh,
+            jnp.arcsinh,
+            lambda z: jnp.arccosh(jnp.abs(z) + 1.5),
+            lambda z: jnp.arctanh(jnp.tanh(z)),
+            jnp.cbrt,
+            jnp.exp2,
+            lambda z: jax.scipy.special.gammaln(jnp.abs(z) + 0.5),
+            lambda z: jax.scipy.special.digamma(jnp.abs(z) + 0.5),
+            lambda z: jax.nn.gelu(z, approximate=False),
+        ]
+        x = np.random.randn(6)
+        for f in functions:
+            for sparsity in [0, x.size]:
+                with self.subTest(f=getattr(f, '__name__', str(f)), sparsity=sparsity):
+                    self.check_forward_laplacian(f, x, sparsity)
+
+    def test_piecewise(self):
+        # Piecewise linear/constant primitives with zero Hessian a.e.
+        functions = [
+            lambda z: jnp.clip(z, -0.5, 0.5),
+            lambda z: jax.lax.rem(z, 0.7),
+            lambda z: jnp.floor(z * 3) * z,
+            lambda z: jnp.ceil(z * 3) * z,
+            lambda z: jnp.round(z * 3) * z,
+            lambda z: jax.lax.cummax(z, axis=0),
+            lambda z: jax.lax.cummin(z, axis=0),
+        ]
+        x = np.random.randn(6)
+        for i, f in enumerate(functions):
+            for sparsity in [0, x.size]:
+                with self.subTest(case=i, sparsity=sparsity):
+                    self.check_forward_laplacian(f, x, sparsity)
+
+    def test_cumprod(self):
+        # cumprod is shape-preserving but not elementwise; its Hessian has
+        # off-diagonal blocks and must not take the elementwise JHJ fast path.
+        x = np.random.randn(6)
+
+        def f(z):
+            return jnp.cumprod(jnp.sin(z))
+
+        for sparsity in [0, x.size]:
+            with self.subTest(sparsity=sparsity):
+                self.check_forward_laplacian(f, x, sparsity)
+
+    def test_indexing_primitives(self):
+        functions = [
+            lambda z: jnp.stack([z, z * 2], axis=1),
+            lambda z: jnp.stack([z, jnp.ones(6)], axis=0),
+            lambda z: jnp.unstack(z.reshape(2, 3))[1],
+            lambda z: jnp.tile(z.reshape(2, 3), (2, 2)),
+            lambda z: jnp.copy(z) * z,
+            lambda z: jax.lax.dynamic_update_slice(z, z[:2] ** 2, (3,)),
+            lambda z: jax.lax.dynamic_update_slice(jnp.zeros(8), z**2, (3,)),
+        ]
+        x = np.random.randn(6)
+        for i, f in enumerate(functions):
+            for sparsity in [0, x.size]:
+                with self.subTest(case=i, sparsity=sparsity):
+                    self.check_forward_laplacian(f, x, sparsity)
+
+    def test_indexing_with_constants_stays_sparse(self):
+        # Constant operands are masked with int32 fill values; the masks must
+        # match that dtype or the op silently falls back to a dense jacobian.
+        functions = [
+            lambda z: jnp.concatenate([z, jnp.ones(4)]),
+            lambda z: jnp.stack([z, jnp.ones(8)]),
+            lambda z: jnp.pad(z, (1, 2)),
+        ]
+        x = jax.random.normal(jax.random.PRNGKey(0), (8,))
+        for i, f in enumerate(functions):
+            with self.subTest(case=i):
+                y = forward_laplacian(f, sparsity_threshold=1)(x)
+                self.assertTrue(y.is_jacobian_weak)
+                self.assertEqual(y.jacobian.data.shape[0], 1)
