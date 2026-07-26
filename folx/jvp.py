@@ -510,7 +510,8 @@ def sparse_scatter_jvp(
         return dense_jvp(fwd, laplace_args, flags=flags, in_axes=in_axes)
     # scatter (set) overwrites operand entries; add/min/max keep them varying.
     is_set = FunctionFlags.INDEXING in flags
-    if not isinstance(updates, FwdLaplArray) and fwd.__name__ == 'scatter_add':
+    is_add = fwd.__name__ == 'scatter_add'
+    if not isinstance(updates, FwdLaplArray) and is_add:
         # Adding constants only shifts the output; the operand must be a
         # FwdLaplArray by exclusion and its Jacobian and Laplacian pass through.
         y: Array = fwd(*laplace_args.x)  # type: ignore
@@ -560,13 +561,25 @@ def sparse_scatter_jvp(
     pos_u, dep_u = unique_keys // n_dep, unique_keys % n_dep
     counts = np.bincount(pos_u, minlength=op_size)
     max_out = int(counts.max()) if counts.size > 0 else 0
+    # scatter_add is linear with unit coefficients, so the output Jacobian can
+    # be accumulated straight from the sparse input rows (k_upd many) instead
+    # of aligning max_out tangent rows per argument.
+    k_upd = (
+        updates.jacobian.mask.shape[JAC_DIM]
+        if isinstance(updates, FwdLaplArray)
+        else max_out
+    )
+    use_direct = is_add and isinstance(updates, FwdLaplArray) and k_upd < max_out
     densify = max_out > sparsity_threshold
     if densify:
         # Densifying the small scatter output is often much cheaper than
         # materializing the inputs' dense Jacobians before the scatter.
         n_dense = max(a.jacobian.max_n for a in laplace_args.arrays) + 1
         upd_size = int(np.prod(updates.shape, dtype=int))
-        sparse_cost = (max_out + 1) * (upd_size + op_size) + n_dense * op_size
+        if use_direct:
+            sparse_cost = k_upd * upd_size + (max_out + n_dense) * op_size
+        else:
+            sparse_cost = (max_out + 1) * (upd_size + op_size) + n_dense * op_size
         dense_cost = n_dense * (upd_size + op_size)
         if sparse_cost >= dense_cost:
             logging.info(
@@ -585,6 +598,47 @@ def sparse_scatter_jvp(
 
     # Identify which laplace args are the operand and the updates.
     arg_ids = merge(tuple(range(len(laplace_args))), (None,) * len(extra_args))  # type: ignore
+
+    def to_jacobian(g):
+        jac = FwdJacobian(g, out_mask)
+        return jac.as_dense if densify else jac
+
+    if use_direct:
+        grad_out = None
+        for i, arr in enumerate(laplace_args.arrays):
+            if i == arg_ids[2]:
+                # Updates: bucket every sparse entry by (output row, position).
+                mask = np.broadcast_to(
+                    arr.jacobian.mask, (k_upd, *updates.shape)
+                ).astype(np.int64)
+                tpos = np.broadcast_to(target_pos, mask.shape)
+                key = tpos * n_dep + mask
+                idx = np.minimum(
+                    np.searchsorted(unique_keys, key), unique_keys.size - 1
+                )
+                found = (mask >= 0) & (tpos >= 0) & (unique_keys[idx] == key)
+                bucket = np.where(found, slots[idx] * op_size + tpos, -1).reshape(-1)
+                data = jnp.broadcast_to(arr.jacobian.data, mask.shape).reshape(-1)
+                gathered = materialize_by_gather(
+                    data[None], bucket[None], max_out * op_size
+                )
+                if gathered is not None:
+                    contrib = gathered[0]
+                else:
+                    contrib = jax.ops.segment_sum(data, bucket, max_out * op_size)
+                contrib = contrib.reshape(max_out, *op_shape)
+            else:
+                # The operand passes through scatter_add unchanged.
+                contrib = arr.jacobian.materialize_for_idx(
+                    arr.jacobian.get_index_mask(out_mask), max_idx=max_out
+                )
+                contrib = jnp.broadcast_to(contrib, (max_out, *op_shape))
+            grad_out = contrib if grad_out is None else grad_out + contrib
+        lapl_tangents = tuple(
+            jnp.broadcast_to(a.laplacian, a.shape) for a in laplace_args.arrays
+        )
+        y, lapl_y = jax.jvp(fwd, laplace_args.x, lapl_tangents)
+        return y, to_jacobian(grad_out), lapl_y
 
     # Align every argument's Jacobian rows with the output mask rows.
     tangents = []
@@ -623,25 +677,11 @@ def dense_joint_jvp(
     fwd: ForwardFn,
     laplace_args: FwdLaplArgs,
 ) -> tuple[Array, FwdJacobian, Array]:
-    # For some operation it is better to first concatenate and then do the jvp.
-    tangent = tree_concat(
-        [
-            extend_jacobians(*laplace_args.dense_jacobian, axis=JAC_DIM),
-            tree_expand(laplace_args.laplacian, axis=JAC_DIM),
-        ],
-        axis=JAC_DIM,
-    )
-
-    @functools.partial(jax.vmap, in_axes=0, out_axes=(None, 0))
-    def jvp(tangents):
-        return jax.jvp(fwd, laplace_args.x, tangents)
-
-    y, y_tangent = jvp(tangent)
-    grad_y, lapl_y = (
-        tree_take(y_tangent, slice(None, -1), axis=JAC_DIM),
-        tree_take(y_tangent, -1, axis=JAC_DIM),
-    )
-    return y, grad_y, lapl_y
+    # The jacobian and laplacian tangents share the primal computation via
+    # linearize. Evaluating them in two calls avoids concatenating them into
+    # a single tangent buffer, which costs a full jacobian-sized copy; the
+    # extra laplacian call is 1/x0_dim of the jacobian work.
+    return dense_split_jvp(fwd, laplace_args)
 
 
 def dense_split_jvp(
