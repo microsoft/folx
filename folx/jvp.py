@@ -246,7 +246,9 @@ def sparse_jvp(
     lapl_y = tree_take(y_tangent, -1, axis=JAC_DIM)
 
     new_masks = broadcast_mask_to_jacobian(out_mask, grad_y)
-    assert grad_y.shape == new_masks.shape, f'{grad_y.shape} != {new_masks.shape}'
+    assert jtu.tree_all(
+        jtu.tree_map(lambda g, m: g.shape == m.shape, grad_y, new_masks)
+    )
 
     grad_y = jtu.tree_map(FwdJacobian, grad_y, new_masks)
     return y, grad_y, lapl_y
@@ -304,20 +306,23 @@ def sparse_diag_jvp(
         # Merge rows sharing a mask. The mapping is static, so a gather plus
         # per-group sums beats a runtime scatter (segment_sum).
         inv = inv.reshape(-1)
-        parts = [
-            grad_y[group].sum(JAC_DIM, keepdims=True)
-            if group.size > 1
-            else grad_y[group]
-            for group in (
-                np.where(inv == o)[0] for o in range(result_mask.shape[JAC_DIM])
-            )
-        ]
-        grad_y = jnp.concatenate(parts, axis=JAC_DIM) if len(parts) > 1 else parts[0]
+        groups = [np.where(inv == o)[0] for o in range(result_mask.shape[JAC_DIM])]
+
+        def merge_rows(g):
+            parts = [
+                g[group].sum(JAC_DIM, keepdims=True) if group.size > 1 else g[group]
+                for group in groups
+            ]
+            return jnp.concatenate(parts, axis=JAC_DIM) if len(parts) > 1 else parts[0]
+
+        grad_y = jtu.tree_map(merge_rows, grad_y)
 
     # We need to broadcast the output mask to the shape of the gradient in case the operation
     # included some broadcasting, e.g., (10, 1) * (5,) -> (10, 5)
     result_mask = broadcast_mask_to_jacobian(result_mask, grad_y)
-    assert grad_y.shape == result_mask.shape, f'{grad_y.shape} != {result_mask.shape}'
+    assert jtu.tree_all(
+        jtu.tree_map(lambda g, m: g.shape == m.shape, grad_y, result_mask)
+    )
 
     grad_y = jtu.tree_map(FwdJacobian, grad_y, result_mask)
     return y, grad_y, lapl_y
@@ -370,8 +375,14 @@ def sparse_index_jvp(
                     ]
                 )  # type: ignore
 
+            # Masks must be int32 to match the fill values of constant
+            # arguments; under x64 they may arrive as int64.
+            masks = jtu.tree_map(
+                lambda m: np.asarray(m, dtype=np.int32),
+                laplace_args.jacobian_mask,
+            )
             mask = jax.vmap(_merged_fwd, in_axes=JAC_DIM, out_axes=JAC_DIM)(
-                *broadcast_dim(laplace_args.jacobian_mask, fill_value=-1, axis=JAC_DIM)
+                *broadcast_dim(masks, fill_value=-1, axis=JAC_DIM)
             )
             mask = jtu.tree_map(lambda x: np.asarray(x, dtype=int), mask)
     except Exception as e:
@@ -528,7 +539,7 @@ def dense_elementwise_jvp(
     fwd: ForwardFn, laplace_args: FwdLaplArgs
 ) -> tuple[Array, FwdJacobian, Array]:
     y: Array = fwd(laplace_args.x[0])  # type: ignore
-    if y.shape != laplace_args.x[0].shape:
+    if not isinstance(y, Array) or y.shape != laplace_args.x[0].shape:
         return dense_split_jvp(fwd, laplace_args)
 
     jac = vjp(fwd, laplace_args.x[0])(jnp.ones_like(y))[0]
@@ -634,8 +645,15 @@ def get_jvp_function(
             if y is None:
                 y, grad, lapl = y_, grad_, lapl_
             else:
-                grad += grad_  # type: ignore
-                lapl += lapl_
+                # For multi-output functions grad and lapl are pytrees, so we
+                # accumulate per output rather than via += (tuple concatenation).
+                grad = jtu.tree_map(
+                    lambda a, b: a + b,
+                    grad,
+                    grad_,
+                    is_leaf=lambda a: isinstance(a, FwdJacobian),
+                )
+                lapl = jtu.tree_map(lambda a, b: a + b, lapl, lapl_)
         return y, grad, lapl  # type: ignore
 
     def jvp(args: FwdLaplArgs, kwargs) -> tuple[Array, FwdJacobian, Array]:

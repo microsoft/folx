@@ -396,6 +396,83 @@ class TestForwardLaplacian(LaplacianTestCase):
                 y = jax.jit(forward_laplacian(functools.partial(f, dtype=dtype)))(x)
                 self.assertIsInstance(y, jax.Array)
 
+    def test_multi_output(self):
+        # Regression test for #29: multi-output functions produce pytree
+        # gradients, so a single input mask must be broadcast to every output.
+        x = np.random.randn(8)
+
+        @jax.custom_jvp
+        def sincos(x):
+            return jnp.sin(x), jnp.cos(x)
+
+        @sincos.defjvp
+        def sincos_jvp(primals, tangents):
+            ((x,), (dx,)) = primals, tangents
+            return sincos(x), (jnp.cos(x) * dx, -jnp.sin(x) * dx)
+
+        @jax.custom_jvp
+        def sumdiff(a, b):
+            return a + b, a - b
+
+        @sumdiff.defjvp
+        def sumdiff_jvp(primals, tangents):
+            ((a, b), (da, db)) = primals, tangents
+            return sumdiff(a, b), (da + db, da - db)
+
+        @jax.jit
+        def sincos_elemwise(x):
+            return jnp.sin(x), jnp.cos(x)
+
+        @jax.jit
+        def sumdiff_elemwise(a, b):
+            return a + b, a - b
+
+        register_function(
+            'sincos_elemwise',
+            wrap_forward_laplacian(
+                lambda x: (jnp.sin(x), jnp.cos(x)), in_axes=(), name='sincos_elemwise'
+            ),
+        )
+        register_function(
+            'sumdiff_elemwise',
+            wrap_forward_laplacian(
+                lambda a, b: (a + b, a - b), in_axes=(), name='sumdiff_elemwise'
+            ),
+        )
+
+        def single_arg(x):
+            return sincos(x)
+
+        def multi_arg(x):
+            return sumdiff(jnp.sin(x), jnp.cos(x))
+
+        def single_arg_elemwise(x):
+            return sincos_elemwise(x)
+
+        def multi_arg_elemwise(x):
+            return sumdiff_elemwise(jnp.sin(x), jnp.cos(x))
+
+        try:
+            fns = [single_arg, multi_arg, single_arg_elemwise, multi_arg_elemwise]
+            for f in fns:
+                for sparsity in [0, x.size]:
+                    with self.subTest(f=f.__name__, sparsity=sparsity):
+                        y = forward_laplacian(f, sparsity)(x)
+                        self.assertEqual(len(y), 2)
+                        for i, y_i in enumerate(y):
+
+                            def f_i(x, f=f, i=i):
+                                return f(x)[i]
+
+                            self.assert_allclose(y_i.x, f_i(x))
+                            self.assert_allclose(
+                                y_i.jacobian.dense_array, self.jacobian(f_i, x).T
+                            )
+                            self.assert_allclose(y_i.laplacian, self.laplacian(f_i, x))
+        finally:
+            deregister_function('sincos_elemwise')
+            deregister_function('sumdiff_elemwise')
+
     def test_split(self):
         x = jax.random.normal(jax.random.PRNGKey(0), (16,))
 

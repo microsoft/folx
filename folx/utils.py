@@ -615,8 +615,15 @@ def extract_jacobian_mask(arrays: Sequence[ArrayOrFwdLaplArray]):
 
 
 def broadcast_mask_to_jacobian(mask: PyTree[np.ndarray], jacobian: PyTree[Array]):
-    """
-    Broadcasts the given mask to the given jacobian.
+    """Broadcasts the given mask to the given jacobian.
+
+    Args:
+        mask: Mask pytree. May be a pytree prefix of ``jacobian``, e.g., a
+            single mask shared by all outputs of a multi-output function.
+        jacobian: Jacobian pytree.
+
+    Returns:
+        Mask pytree matching the structure of ``jacobian``.
     """
 
     def broadcast(m: np.ndarray, j: Array):
@@ -632,7 +639,15 @@ def broadcast_mask_to_jacobian(mask: PyTree[np.ndarray], jacobian: PyTree[Array]
         with jax.ensure_compile_time_eval():
             return np.asarray(brdcast(m), dtype=m.dtype)
 
-    return jtu.tree_map(broadcast, mask, jacobian)
+    # As mask may be a pytree prefix of jacobian, each mask leaf is broadcast
+    # to all jacobian leaves of its subtree.
+    return jtu.tree_map(
+        lambda m, jac_subtree: jtu.tree_map(
+            functools.partial(broadcast, m), jac_subtree
+        ),
+        mask,
+        jacobian,
+    )
 
 
 class LoggingPrefix(logging.Formatter):
