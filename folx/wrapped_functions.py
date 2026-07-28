@@ -32,7 +32,8 @@ from .custom_hessian import (
     complex_abs_jac_hessian_jac,
     div_jac_hessian_jac,
 )
-from .slogdet import slogdet_wrapper
+from .linear_solve import inv_wrapper, solve_wrapper
+from .slogdet import det_wrapper, slogdet_wrapper
 from .wrapper import (
     warp_without_fwd_laplacian,
     wrap_elementwise,
@@ -554,6 +555,9 @@ _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
     'softplus': wrap_forward_laplacian(jax.nn.softplus, in_axes=()),
     'silu': wrap_forward_laplacian(jax.nn.silu, in_axes=()),
     'slogdet': slogdet_wrapper,
+    'det': det_wrapper,
+    'inv': inv_wrapper,
+    'solve': solve_wrapper,
 }
 
 

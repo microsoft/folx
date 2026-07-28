@@ -420,6 +420,84 @@ class TestForwardLaplacian(LaplacianTestCase):
         self.assert_allclose(y.jacobian.dense_array, self.jacobian(f, x))
         self.assert_allclose(y.laplacian, self.laplacian(f, x))
 
+    @parameterized.expand([(False,), (True,)])
+    def test_det(self, test_complex: bool):
+        n = 5
+        x = np.random.normal(size=(n, 3))
+        w = np.random.normal(size=(n, 3, n))
+        if test_complex:
+            w = w + 1j * np.random.normal(size=w.shape)
+
+        @jax.jit
+        def f(x):
+            return jnp.linalg.det(
+                n * jnp.eye(n) + jnp.tanh(jnp.einsum('id,idj->ij', x, w))
+            )
+
+        for sparsity in [0, x.size]:
+            with self.subTest(sparsity=sparsity):
+                y = jax.jit(forward_laplacian(f, sparsity))(x)
+                self.assert_allclose(y.x, f(x))
+                self.assert_allclose(
+                    y.jacobian.dense_array, self.jacobian(f, x).reshape(-1)
+                )
+                self.assert_allclose(y.laplacian, self.laplacian(f, x))
+
+    def test_solve(self):
+        n = 5
+        x = np.random.normal(size=(n, 3))
+        w = np.random.normal(size=(n, 3, n))
+        w_batched = np.random.normal(size=(2, n, 3, n))
+        A_const = n * np.eye(n) + np.tril(np.random.normal(size=(n, n)), -1)
+        b_vec = np.random.normal(size=(n,))
+        b_mat = np.random.normal(size=(n, 2))
+
+        def mat(x):
+            return n * jnp.eye(n) + jnp.tanh(jnp.einsum('id,idj->ij', x, w))
+
+        def batched_mat(x):
+            return n * jnp.eye(n) + jnp.tanh(jnp.einsum('id,kidj->kij', x, w_batched))
+
+        cases = {
+            'matrix varies, vector rhs': lambda x: jnp.linalg.solve(mat(x), b_vec),
+            'matrix varies, matrix rhs': lambda x: jnp.linalg.solve(mat(x), b_mat),
+            'both vary': lambda x: jnp.linalg.solve(mat(x), jnp.tanh(x).sum(-1)),
+            'rhs varies': lambda x: jnp.linalg.solve(A_const, jnp.tanh(x).sum(-1)),
+            # the rhs has fewer batch axes than the solution
+            'batched matrix': lambda x: jnp.linalg.solve(
+                batched_mat(x), jnp.tanh(x).sum(-1)
+            ),
+        }
+        for name, fn in cases.items():
+            f = jax.jit(lambda x, fn=fn: fn(x).sum())
+            for sparsity in [0, x.size]:
+                with self.subTest(case=name, sparsity=sparsity):
+                    y = jax.jit(forward_laplacian(f, sparsity))(x)
+                    self.assert_allclose(y.x, f(x))
+                    self.assert_allclose(
+                        y.jacobian.dense_array, self.jacobian(f, x).reshape(-1)
+                    )
+                    self.assert_allclose(y.laplacian, self.laplacian(f, x))
+
+    def test_inv(self):
+        n = 4
+        x = np.random.normal(size=(n, 3))
+        w = np.random.normal(size=(n, 3, n))
+
+        @jax.jit
+        def f(x):
+            return jnp.linalg.inv(
+                n * jnp.eye(n) + jnp.tanh(jnp.einsum('id,idj->ij', x, w))
+            )
+
+        for sparsity in [0, x.size]:
+            with self.subTest(sparsity=sparsity):
+                y = jax.jit(forward_laplacian(f, sparsity))(x)
+                self.assert_allclose(y.x, f(x))
+                jac = self.jacobian(f, x).reshape(n, n, x.size)
+                self.assert_allclose(y.jacobian.dense_array, np.moveaxis(jac, -1, 0))
+                self.assert_allclose(y.laplacian, self.laplacian(f, x).reshape(n, n))
+
     def test_custom_hessian(self):
         x = np.random.normal(size=(16,))
 

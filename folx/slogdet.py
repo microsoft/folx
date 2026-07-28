@@ -293,16 +293,36 @@ def sparse_slogdet(A: FwdLaplArray):
     return _sparse_slogdet(_transposed(A) if transposed else A, tables)
 
 
-def dense_slogdet(A: FwdLaplArray):
-    """Forward laplacian of slogdet for a dense jacobian.
+def _dense_log_det(A: FwdLaplArray):
+    """Derivatives of ``log det A`` from the dense jacobian.
 
-    Both outputs follow from the single product ``M_c = A^-1 dA/dx_c``,
+    Both follow from the single product ``M_c = A^-1 dA/dx_c``,
 
         d_c log det A       = tr(M_c)
         Delta log det A     = tr(A^-1 Delta A) - sum_c tr(M_c M_c)
 
-    For complex matrices these are the derivatives of ``log det A``, whose real
-    part is ``log|det A|`` and whose imaginary part is the phase of the sign.
+    Args:
+        A: Forward laplacian array of the matrix, shape (..., n, n).
+
+    Returns:
+        ``(sign, logdet, jacobian, laplacian)``: the outputs of ``slogdet`` and the
+        derivatives of ``log det A``, which are complex for complex matrices.
+    """
+    sign, logdet = slogdet(A.x)
+    A_inv = jnp.linalg.inv(A.x)
+    M = jnp.einsum('...ij,k...jd->k...id', A_inv, A.jacobian.dense_array)
+    jacobian = jnp.einsum('k...ii->k...', M)
+    laplacian = jnp.einsum('...ji,...ij->...', A_inv, A.laplacian)
+    laplacian -= jnp.einsum('k...id,k...di->...', M, M)
+    return sign, logdet, jacobian, laplacian
+
+
+def dense_slogdet(A: FwdLaplArray):
+    """Forward laplacian of slogdet for a dense jacobian.
+
+    For complex matrices the derivatives of ``log det A`` are complex, with the
+    real part belonging to ``log|det A|`` and the imaginary part to the phase of
+    the sign.
 
     Args:
         A: Forward laplacian array of the matrix, shape (..., n, n).
@@ -311,12 +331,7 @@ def dense_slogdet(A: FwdLaplArray):
         Tuple of sign and the FwdLaplArray of log|det A|. The sign is an array for
         real matrices and a FwdLaplArray for complex ones.
     """
-    sign, logdet = slogdet(A.x)
-    A_inv = jnp.linalg.inv(A.x)
-    M = jnp.einsum('...ij,k...jd->k...id', A_inv, A.jacobian.dense_array)
-    jacobian = jnp.einsum('k...ii->k...', M)
-    laplacian = jnp.einsum('...ji,...ij->...', A_inv, A.laplacian)
-    laplacian -= jnp.einsum('k...id,k...di->...', M, M)
+    sign, logdet, jacobian, laplacian = _dense_log_det(A)
     if is_tree_complex(A.x):
         # sign = exp(i phase) with phase = Im log det A
         phase, phase_lapl = jacobian.imag, laplacian.imag
@@ -341,3 +356,40 @@ def slogdet_wrapper(
     if result is not None:
         return result
     return dense_slogdet(A)
+
+
+def det_wrapper(
+    x: tuple[ArrayOrFwdLaplArray],
+    kwargs: dict[str, Any],
+    sparsity_threshold: int,
+):
+    """Forward laplacian of ``det A``.
+
+    Since ``det A = exp(log det A)``, the derivatives follow from those of the log
+    determinant, so the whole sparsity machinery of ``sparse_slogdet`` applies:
+
+        d_c det A       = det A d_c log det A
+        Delta det A     = det A (Delta log det A + sum_c (d_c log det A)^2)
+
+    Args:
+        x: Tuple holding the matrix, shape (..., n, n).
+        kwargs: Unused.
+        sparsity_threshold: Unused; a determinant depends on all coordinates its
+            matrix depends on.
+
+    Returns:
+        The FwdLaplArray of ``det A``.
+    """
+    A = x[0]
+    if not isinstance(A, FwdLaplArray):
+        return jnp.linalg.det(A)
+    result = sparse_slogdet(A)
+    if result is not None:
+        sign, logdet = result
+        det = sign * jnp.exp(logdet.x)
+        jacobian, laplacian = logdet.jacobian.dense_array, logdet.laplacian
+    else:
+        sign, logdet, jacobian, laplacian = _dense_log_det(A)
+        det = sign * jnp.exp(logdet)
+    laplacian = det * (laplacian + jnp.einsum('k...,k...->...', jacobian, jacobian))
+    return FwdLaplArray(det, FwdJacobian.from_dense(det * jacobian), laplacian)
