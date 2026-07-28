@@ -7,35 +7,6 @@ from .api import Array, ExtraArgs, FwdLaplArgs, MergeFn
 from .utils import get_reduced_jacobians, trace_jac_jacT
 
 
-def slogdet_jac_hessian_jac(
-    args: FwdLaplArgs,
-    extra_args: ExtraArgs,
-    merge: MergeFn,
-    materialize_idx: Array | None,
-):
-    # For slogdet we know how to compute the determinant faster.
-    # We can use the fact that the jacobian of logdet is A^-1.
-    # Thus, the hessian is A^-1 (x) A^-T. Where (x) is the kronecker product.
-    # We can now reformulate this to (A^-1 (x) I)(A^-1 (x) I)^T.
-    # If one wants to compute the product vec(M)(A^-1 (x) I), this can be
-    # efficiently evaluated as vec(MA^-1). As we multiply the Hessian from
-    # both sides with the jacobian tr(JHJ^T), this can be efficiently be done
-    # as tr(J@A^-1 @ A^-1^T@J^T) where the inner @ is the outer product.
-    assert len(args.x) == 1
-    A = args.x[0]
-    A_inv = jnp.linalg.inv(A)
-    J = args.jacobian[0].construct_jac_for(materialize_idx)
-    # J: [k, ..., i, j] with k the jacobian dim; M_k = A^-1 J_k.
-    M = jnp.einsum('...ij,k...jd->k...id', A_inv, J)
-    log_abs_out = -jnp.einsum('k...id,k...di->...', M, M)
-
-    if is_tree_complex(A):
-        # this is not the real Tr(JHJ^T) but a cached value we use later to compute the Tr(JHJ^T)
-        return log_abs_out, log_abs_out.real
-    sign_out = jnp.zeros(A.shape[:-2], dtype=log_abs_out.dtype)
-    return sign_out, log_abs_out.real
-
-
 def complex_abs_jac_hessian_jac(
     args: FwdLaplArgs,
     extra_args: ExtraArgs,

@@ -4,7 +4,6 @@ from typing import Any, Literal, ParamSpec, TypeVar, overload
 
 import jax
 import jax.numpy as jnp
-import jax.tree_util as jtu
 import numpy as np
 
 try:
@@ -32,9 +31,8 @@ from .api import (
 from .custom_hessian import (
     complex_abs_jac_hessian_jac,
     div_jac_hessian_jac,
-    slogdet_jac_hessian_jac,
 )
-from .utils import mark_varying_like
+from .slogdet import slogdet_wrapper
 from .wrapper import (
     warp_without_fwd_laplacian,
     wrap_elementwise,
@@ -316,76 +314,6 @@ def dtype_conversion(
     sparsity_threshold: int,
 ):
     return args[0].astype(kwargs['new_dtype'])
-
-
-@jax.custom_jvp
-def slogdet(x):
-    # We only need this custom slog det to avoid a jax bug
-    # https://github.com/google/jax/issues/17379
-    # We explictily decompose this here as newer version will return
-    # SlogDetResult which is a NamedTuple and does not combine nicely with regular tuples.
-    sign, logdet = jnp.linalg.slogdet(x)
-    return sign, logdet
-
-
-def slogdet_jvp(primals, tangents):
-    # we know that the input will be a single tensor where the last two dims will be reduced
-    # So, instead of using the JVP from JAX, we compute the jacobian explicitly via backprop
-    # and then compute the dot product with the tangent.
-    primals, tangents = primals[0], tangents[0]
-    batch_shape = primals.shape[:-2]  # the last two will be reduced
-    tangents = tangents.reshape(-1, *tangents.shape[-2:])
-    primals = primals.reshape(-1, *primals.shape[-2:])
-
-    sign, logdet = jnp.linalg.slogdet(primals)
-    y = sign, logdet
-
-    jacobians = jnp.linalg.inv(primals)
-
-    def custom_jvp(jacobian, tangent, sign):
-        jac_dot_tangent = jnp.vdot(jacobian.T.conj(), tangent)
-        if jac_dot_tangent.dtype in (jnp.complex64, jnp.complex128):
-            # this is not the real jvp but a cached value to ease the Tr(JHJ^T) computation
-            sign_jvp = jac_dot_tangent
-            log_det_jvp = jac_dot_tangent.real
-        else:
-            sign_jvp = mark_varying_like(
-                jnp.zeros((), dtype=jac_dot_tangent.dtype), jac_dot_tangent
-            )
-            log_det_jvp = jac_dot_tangent
-        return (sign_jvp, log_det_jvp)
-
-    y_tangent = jax.vmap(custom_jvp)(jacobians, tangents, sign)
-
-    y, y_tangent = jtu.tree_map(lambda x: x.reshape(*batch_shape), (y, y_tangent))
-    return y, y_tangent
-
-
-slogdet.defjvp(slogdet_jvp)
-
-
-def slogdet_wrapper(
-    x: tuple[ArrayOrFwdLaplArray],
-    kwargs: dict[str, Any],
-    sparsity_threshold: int,
-):
-    fwd_lapl_fn = wrap_forward_laplacian(
-        slogdet, custom_jac_hessian_jac=slogdet_jac_hessian_jac
-    )
-    sign, logdet = fwd_lapl_fn(x, {}, sparsity_threshold=0)
-    # Remove the jacobian of the sign
-    if jax.dtypes.issubdtype(sign.dtype, jnp.complexfloating):
-        sign_jac = sign.jacobian.data
-        sign_jac_flat = sign_jac.reshape(-1, *sign.shape).imag
-        sign_jac_dot = jnp.einsum('i...,i...->...', sign_jac_flat, sign_jac_flat)
-        sign = FwdLaplArray(
-            sign.x,
-            FwdJacobian(1.0j * sign.x * sign_jac.imag, x0_idx=sign.jacobian.x0_idx),
-            sign.x * (1.0j * sign.laplacian.imag - sign_jac_dot),
-        )
-    if jax.dtypes.issubdtype(sign.dtype, jnp.floating):
-        sign = sign.x
-    return sign, logdet
 
 
 @jax.custom_jvp

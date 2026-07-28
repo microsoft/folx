@@ -1,5 +1,6 @@
 import functools
 from functools import partial
+from unittest import mock
 
 import jax
 import jax.numpy as jnp
@@ -15,6 +16,7 @@ from folx import (
     register_function,
     wrap_forward_laplacian,
 )
+from folx import slogdet as slogdet_module
 from folx.api import FwdLaplArray
 
 
@@ -335,6 +337,88 @@ class TestForwardLaplacian(LaplacianTestCase):
                         self.assertIsInstance(sign_y, jax.Array)
                     del sign_y
                     del log_y
+
+    @parameterized.expand(
+        [
+            ('row_sparse', True, False),
+            ('two_rows', True, False),
+            ('columns', True, False),
+            ('two_columns', True, False),
+            ('shared_rows', False, False),
+            ('batched', True, True),
+        ]
+    )
+    def test_slogdet_sparse(self, mode: str, expect_fast: bool, batched: bool):
+        n = 6
+        x = np.random.normal(size=(n, 3))
+        w = np.random.normal(size=(n, 3, n))
+
+        def orbitals(x):
+            if batched:
+                # (mol, det, elec, orb) as in a multi-determinant ansatz
+                return jnp.stack([jnp.tanh(x), jnp.sin(x)])[None]
+            return jnp.tanh(x)
+
+        @jax.jit
+        def f(x):
+            if mode in ('columns', 'two_columns'):
+                # every column depends on a single particle
+                A = jnp.einsum('jd,jdi->ij', x, w)
+                if mode == 'two_columns':
+                    A = A + jnp.roll(A, 1, axis=1)
+                return jnp.linalg.slogdet(orbitals(A))[1].sum()
+            # every row depends on a single particle
+            A = jnp.einsum('id,idj->ij', x, w)
+            if mode == 'two_rows':
+                # each coordinate touches two rows, so dA/dx_c is rank two
+                A = A + jnp.roll(A, 1, axis=0)
+            elif mode == 'shared_rows':
+                # every coordinate touches every row, so there is no structure left
+                A = A + x.sum()
+            return jnp.linalg.slogdet(orbitals(A))[1].sum()
+
+        for sparsity in [0, x.size]:
+            with self.subTest(sparsity=sparsity):
+                taken = []
+                fast_fn = slogdet_module.sparse_slogdet
+                with mock.patch.object(
+                    slogdet_module,
+                    'sparse_slogdet',
+                    lambda A: taken.append(fast_fn(A)) or taken[-1],
+                ):
+                    y = jax.jit(forward_laplacian(f, sparsity))(x)
+                fast = any(t is not None for t in taken)
+                self.assertEqual(fast, expect_fast and sparsity > 0)
+                self.assert_allclose(y.x, f(x))
+                self.assert_allclose(
+                    y.jacobian.dense_array, self.jacobian(f, x).reshape(-1)
+                )
+                self.assert_allclose(y.laplacian, self.laplacian(f, x))
+
+    def test_slogdet_element_sparse(self):
+        n = 6
+        x = np.random.normal(size=(n,))
+        perm = np.stack([np.roll(np.arange(n), s) for s in range(n)])
+
+        @jax.jit
+        def f(x):
+            # every coordinate touches one entry per row, so neither orientation
+            # has low rank and the factors are single entries
+            return jnp.linalg.slogdet(2 * jnp.eye(n) + 0.5 * jnp.tanh(x)[perm])[1]
+
+        used = []
+        kernel = slogdet_module._sparse_slogdet
+        with mock.patch.object(
+            slogdet_module,
+            '_sparse_slogdet',
+            lambda A, tables: used.append(tables[0].shape) or kernel(A, tables),
+        ):
+            y = jax.jit(forward_laplacian(f, x.size))(x)
+        # n factors of one entry each per coordinate
+        self.assertEqual(used, [(n, n, 1)])
+        self.assert_allclose(y.x, f(x))
+        self.assert_allclose(y.jacobian.dense_array, self.jacobian(f, x))
+        self.assert_allclose(y.laplacian, self.laplacian(f, x))
 
     def test_custom_hessian(self):
         x = np.random.normal(size=(16,))
