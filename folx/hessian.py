@@ -285,6 +285,42 @@ def _per_position_intersection(masks: Sequence[np.ndarray]) -> np.ndarray:
     return np.where(result == sentinel, -1, result)
 
 
+def _keep_below(idx: np.ndarray, n_rows: int) -> np.ndarray:
+    """Intersects per-position sets with the row range of a dense operand.
+
+    ``idx`` is sorted ascending with ``-1`` padding last, so dropping the values
+    at or above ``n_rows`` keeps that layout and only empties trailing columns.
+
+    Args:
+        idx: Sorted per-position sets of shape ``(*S, M)``.
+        n_rows: Number of rows of the dense operand.
+    Returns:
+        Array of shape ``(*S, M')`` with the out of range values removed.
+    """
+    idx = np.where(idx < n_rows, idx, -1)
+    width = int((idx >= 0).sum(-1).max()) if idx.size > 0 else 0
+    return idx[..., :width]
+
+
+def _union_with_rows(
+    idx: np.ndarray, n_rows: int, frame: tuple[int, ...]
+) -> np.ndarray:
+    """Unions per-position sets with the full row range of a dense operand.
+
+    Args:
+        idx: Sorted per-position sets of shape ``(*S, M)``.
+        n_rows: Number of rows of the dense operand.
+        frame: Position frame the result is broadcast over.
+    Returns:
+        Sorted per-position sets including every row of the dense operand.
+    """
+    base = np.broadcast_to(np.arange(n_rows, dtype=idx.dtype), (*frame, n_rows))
+    extra = _per_position_sorted_unique(np.where(idx >= n_rows, idx, -1))
+    if extra.shape[-1] == 0:
+        return base
+    return np.concatenate([base, extra], axis=-1)
+
+
 def find_out_idx(lapl_args: FwdLaplArgs, in_axes, flags: FunctionFlags, threshold: int):
     """Determine the per-output-position input dependency set for a sparse op.
 
@@ -328,10 +364,24 @@ def find_out_idx(lapl_args: FwdLaplArgs, in_axes, flags: FunctionFlags, threshol
     s_vmap = np.broadcast_shapes(*(a.shape[:num_vmap_dims] for a in aligned))
     broadcasted = [np.broadcast_to(a, (*s_vmap, a.shape[-1])) for a in aligned]
 
+    # A dense Jacobian depends on all of its rows at every position, so its set
+    # is known without looking at the mask. Running the per-position set ops on
+    # it instead costs rows x reduced size per position, which dominates for
+    # contractions against a dense operand.
+    weak = [j.weak for j in lapl_args.jacobian]
+    dense_rows = [
+        int(j.data.shape[JAC_DIM]) for j, w in zip(lapl_args.jacobian, weak) if not w
+    ]
+    sparse = [b for b, w in zip(broadcasted, weak) if w]
+
     if FunctionFlags.LINEAR_IN_ONE in flags:
-        idx = _per_position_intersection(broadcasted)
+        idx = _per_position_intersection(sparse)
+        if dense_rows:
+            idx = _keep_below(idx, min(dense_rows))
     else:
-        idx = _per_position_sorted_unique(np.concatenate(broadcasted, axis=-1))
+        idx = _per_position_sorted_unique(np.concatenate(sparse, axis=-1))
+        if dense_rows:
+            idx = _union_with_rows(idx, max(dense_rows), s_vmap)
 
     idx = np.moveaxis(idx, -1, JAC_DIM).astype(int)
 

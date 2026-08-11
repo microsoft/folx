@@ -170,6 +170,42 @@ class TestForwardLaplacian(LaplacianTestCase):
                         y.laplacian, self.laplacian(f, x).reshape(out_shape)
                     )
 
+    def test_matmul_dense_operand(self):
+        # A contraction against a dense-Jacobian operand: the dense side depends
+        # on every input, so its dependency set must be taken analytically
+        # rather than by a per-position set op over rows x contracted size.
+        n, d, h, heads = 6, 3, 8, 2
+        head_dim = h // heads
+        x = np.random.normal(size=(n, d))
+        w = np.random.normal(size=(d, h)) / np.sqrt(d)
+        m = np.random.normal(size=(n, n)) / np.sqrt(n)
+
+        @jax.jit
+        def mha(x):
+            e = jnp.tanh(x @ w)
+            q, k, v = (e.reshape(n, heads, head_dim),) * 3
+            s = jax.nn.softmax(jnp.einsum('ihd,jhd->hij', q, k), axis=-1)
+            return jnp.einsum('hij,jhd->ihd', s, v).reshape(n, h)
+
+        @jax.jit
+        def mixed(x):
+            a = jnp.tanh(x @ w)
+            return jnp.tanh(m @ a) * a
+
+        for f in [mha, mixed]:
+            for sparsity in [0, 3, x.size]:
+                with self.subTest(f=f.__name__, sparsity=sparsity):
+                    y = forward_laplacian(f, sparsity)(x)
+                    out_shape = f(x).shape
+                    self.assert_allclose(y.x, f(x))
+                    jac = self.jacobian(f, x).reshape(*out_shape, x.size)
+                    self.assert_allclose(
+                        y.jacobian.dense_array, np.moveaxis(jac, -1, 0)
+                    )
+                    self.assert_allclose(
+                        y.laplacian, self.laplacian(f, x).reshape(out_shape)
+                    )
+
     def test_matmul_degenerate_broadcast_shapes(self):
         # einsum patterns whose dot_general has a size-1 or rank-mismatched
         # broadcast dim; the mul-sum decomposition must keep the output shape.

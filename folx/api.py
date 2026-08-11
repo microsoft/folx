@@ -207,10 +207,12 @@ class FwdJacobian(NamedTuple):
         if self.x0_idx is not None:
             return self.x0_idx
         else:
+            # A dense Jacobian's rows are its dependencies; broadcast the row
+            # index rather than materializing it for every element.
             ext_idx = (..., *((None,) * len(self.data_shape)))  # this is for mypy
-            return (
-                np.ones(self.data.shape, dtype=np.int32)
-                * np.arange(self.data.shape[JAC_DIM], dtype=np.int32)[ext_idx]
+            return np.broadcast_to(
+                np.arange(self.data.shape[JAC_DIM], dtype=np.int32)[ext_idx],
+                self.data.shape,
             )
 
     @property
