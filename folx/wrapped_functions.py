@@ -165,8 +165,19 @@ def _dot_general_one_constant(
         # dot is neutral-to-better.
         h_x, h_lapl = jax.lax.optimization_barrier((h_x, h_lapl))
     y_x = op(h_x)
-    y_data = jax.vmap(op, in_axes=0, out_axes=0)(jac_data)
-    y_lapl = op(h_lapl)
+    if y_x.size * jac_data.shape[JAC_DIM] >= 2**19:
+        # Evaluating the Laplacian tangent in its own dot splits the product
+        # rule across kernels, so a consumer that multiplies both has to read
+        # the Jacobian back from memory instead of fusing it. One dot over the
+        # joined tangents keeps that chain in a single fusion; only worth the
+        # concatenate once the Jacobian is large enough to be bandwidth bound.
+        y_all = jax.vmap(op, in_axes=0, out_axes=0)(
+            jnp.concatenate((jac_data, h_lapl[None]), axis=0)
+        )
+        y_data, y_lapl = y_all[:-1], y_all[-1]
+    else:
+        y_data = jax.vmap(op, in_axes=0, out_axes=0)(jac_data)
+        y_lapl = op(h_lapl)
     new_x0_idx = None if proj is None else np.broadcast_to(proj, y_data.shape)
     return FwdLaplArray(y_x, FwdJacobian(y_data, new_x0_idx), y_lapl)
 
