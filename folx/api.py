@@ -127,12 +127,13 @@ class FwdJacobian(NamedTuple):
         assert self.weak
         from .utils import broadcast_except
 
-        outputs, mask = broadcast_except((outputs, self.mask), axis=JAC_DIM)
-
         if isinstance(outputs, np.ndarray):
+            # Passed unbroadcast: repeated output axes then cost no lookup table.
             from .utils import static_index_mask
 
-            return static_index_mask(mask, outputs)
+            return static_index_mask(self.mask, outputs)
+
+        outputs, mask = broadcast_except((outputs, self.mask), axis=JAC_DIM)
 
         og_shape = mask.shape[1:]
         flat_mask = mask.reshape(-1, np.prod(og_shape, dtype=int)).T

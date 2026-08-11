@@ -6,13 +6,22 @@ import numpy as np
 import pytest
 
 from folx.api import FwdJacobian
-from folx.utils import static_index_mask
+from folx.utils import compact_repeated_dims_except, static_index_mask
 
 jax.config.update('jax_enable_x64', True)
 
 
 def _brute_force(mask: np.ndarray, outputs: np.ndarray) -> np.ndarray:
     """First matching output row per Jacobian row, by explicit comparison."""
+    shape = np.broadcast_shapes(mask.shape[1:], outputs.shape[1:])
+
+    def expand(a):
+        pad = (1,) * (len(shape) - (a.ndim - 1))
+        return np.broadcast_to(
+            a.reshape(a.shape[0], *pad, *a.shape[1:]), (a.shape[0], *shape)
+        )
+
+    mask, outputs = expand(mask), expand(outputs)
     matching = mask[:, None] == outputs[None, :]
     return np.where(matching.any(1), matching.argmax(1), -1)
 
@@ -29,6 +38,25 @@ def test_static_index_mask(shape, k, n, low):
     )
 
 
+@pytest.mark.parametrize(
+    'mask_shape,out_shape',
+    [
+        ((4, 5), (1, 5)),  # outputs constant along a leading axis
+        ((4, 5), (4, 1)),  # outputs constant along a trailing axis
+        ((3, 4, 5), (1, 1, 5)),
+        ((3, 4, 5), (5,)),  # fewer axes, right aligned
+    ],
+)
+def test_static_index_mask_broadcast(mask_shape, out_shape):
+    """Outputs may be a broadcastable prefix of the mask's position frame."""
+    rng = np.random.default_rng(len(out_shape))
+    mask = rng.integers(-1, 6, size=(3, *mask_shape))
+    outputs = rng.integers(-1, 6, size=(4, *out_shape))
+    np.testing.assert_array_equal(
+        static_index_mask(mask, outputs), _brute_force(mask, outputs)
+    )
+
+
 def test_static_index_mask_chunked():
     rng = np.random.default_rng(0)
     mask = rng.integers(-1, 20, size=(4, 300))
@@ -36,6 +64,29 @@ def test_static_index_mask_chunked():
     np.testing.assert_array_equal(
         static_index_mask(mask, outputs, chunk=64), _brute_force(mask, outputs)
     )
+
+
+@pytest.mark.parametrize('seed', range(6))
+def test_compaction_preserves_unique(seed):
+    """Dropping constant axes must not change which mask rows are unique.
+
+    sparse_diag_jvp compacts before ``np.unique(axis=0)``; both the grouping and
+    the row order have to survive it.
+    """
+    rng = np.random.default_rng(seed)
+    k = int(rng.integers(1, 6))
+    shape = tuple(int(s) for s in rng.integers(1, 4, size=int(rng.integers(1, 4))))
+    a = rng.integers(-1, 4, size=(k, *shape))
+    for d in range(1, a.ndim):
+        if rng.random() < 0.5:
+            a = np.repeat(np.take(a, [0], axis=d), a.shape[d], axis=d)
+
+    u_full, inv_full = np.unique(a, axis=0, return_inverse=True)
+    u_c, inv_c = np.unique(
+        compact_repeated_dims_except(a, axis=0)[0], axis=0, return_inverse=True
+    )
+    np.testing.assert_array_equal(inv_full.reshape(-1), inv_c.reshape(-1))
+    np.testing.assert_array_equal(np.broadcast_to(u_c, u_full.shape), u_full)
 
 
 @pytest.mark.parametrize('shape', [(4,), (3, 2)])

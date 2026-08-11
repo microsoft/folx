@@ -29,6 +29,7 @@ from .utils import (
     flat_wrap,
     get_reduced_jacobians,
     jac_jacT,
+    per_position_sorted_unique,
     trace_jac_jacT,
     trace_of_product,
     vmap_sequences_and_squeeze,
@@ -231,33 +232,6 @@ def _align_mask_for_broadcast(
     return permuted.reshape((*s_shape, k_flat))
 
 
-def _per_position_sorted_unique(arr: np.ndarray) -> np.ndarray:
-    """Sorted unique non-negative values along the last axis, padded with -1.
-
-    Args:
-        arr: shape `(*S, K)`, entries are indices (`>= 0`) or `-1` (fill).
-    Returns:
-        Array of shape `(*S, M)` where `M` is the maximum per-position count of
-        unique non-negative values, sorted ascending, padded with `-1`.
-    """
-    leading = arr.shape[:-1]
-    if arr.shape[-1] == 0:
-        return np.full((*leading, 0), -1, dtype=arr.dtype)
-    sorted_arr = np.sort(arr, axis=-1)
-    prev = np.concatenate(
-        [np.full((*leading, 1), -2, dtype=arr.dtype), sorted_arr[..., :-1]],
-        axis=-1,
-    )
-    is_first = (sorted_arr != prev) & (sorted_arr >= 0)
-    sentinel = np.iinfo(arr.dtype).max
-    masked = np.where(is_first, sorted_arr, sentinel)
-    final = np.sort(masked, axis=-1)
-    counts = is_first.sum(axis=-1)
-    max_count = int(counts.max()) if counts.size > 0 else 0
-    result = final[..., :max_count]
-    return np.where(result == sentinel, -1, result)
-
-
 def _per_position_intersection(masks: Sequence[np.ndarray]) -> np.ndarray:
     """Sorted intersection of input sets along the last axis, padded with -1.
 
@@ -266,7 +240,7 @@ def _per_position_intersection(masks: Sequence[np.ndarray]) -> np.ndarray:
     is in the intersection iff it occupies a length-N run in the sorted union.
     """
     n = len(masks)
-    per_input = [_per_position_sorted_unique(m) for m in masks]
+    per_input = [per_position_sorted_unique(m) for m in masks]
     combined = np.concatenate(per_input, axis=-1)
     leading = combined.shape[:-1]
     total = combined.shape[-1]
@@ -315,7 +289,7 @@ def _union_with_rows(
         Sorted per-position sets including every row of the dense operand.
     """
     base = np.broadcast_to(np.arange(n_rows, dtype=idx.dtype), (*frame, n_rows))
-    extra = _per_position_sorted_unique(np.where(idx >= n_rows, idx, -1))
+    extra = per_position_sorted_unique(np.where(idx >= n_rows, idx, -1))
     if extra.shape[-1] == 0:
         return base
     return np.concatenate([base, extra], axis=-1)
@@ -379,7 +353,7 @@ def find_out_idx(lapl_args: FwdLaplArgs, in_axes, flags: FunctionFlags, threshol
         if dense_rows:
             idx = _keep_below(idx, min(dense_rows))
     else:
-        idx = _per_position_sorted_unique(np.concatenate(sparse, axis=-1))
+        idx = per_position_sorted_unique(np.concatenate(sparse, axis=-1))
         if dense_rows:
             idx = _union_with_rows(idx, max(dense_rows), s_vmap)
 

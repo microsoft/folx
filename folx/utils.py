@@ -114,6 +114,33 @@ def materialize_by_gather(x, idx: np.ndarray, max_idx: int):
     return gathered.sum(2)
 
 
+def per_position_sorted_unique(arr: np.ndarray) -> np.ndarray:
+    """Sorted unique non-negative values along the last axis, padded with -1.
+
+    Args:
+        arr: shape `(*S, K)`, entries are indices (`>= 0`) or `-1` (fill).
+    Returns:
+        Array of shape `(*S, M)` where `M` is the maximum per-position count of
+        unique non-negative values, sorted ascending, padded with `-1`.
+    """
+    leading = arr.shape[:-1]
+    if arr.shape[-1] == 0:
+        return np.full((*leading, 0), -1, dtype=arr.dtype)
+    sorted_arr = np.sort(arr, axis=-1)
+    prev = np.concatenate(
+        [np.full((*leading, 1), -2, dtype=arr.dtype), sorted_arr[..., :-1]],
+        axis=-1,
+    )
+    is_first = (sorted_arr != prev) & (sorted_arr >= 0)
+    sentinel = np.iinfo(arr.dtype).max
+    masked = np.where(is_first, sorted_arr, sentinel)
+    final = np.sort(masked, axis=-1)
+    counts = is_first.sum(axis=-1)
+    max_count = int(counts.max()) if counts.size > 0 else 0
+    result = final[..., :max_count]
+    return np.where(result == sentinel, -1, result)
+
+
 def static_index_mask(
     mask: np.ndarray, outputs: np.ndarray, chunk: int = 1 << 22
 ) -> np.ndarray:
@@ -132,26 +159,36 @@ def static_index_mask(
         matching output row, ``-1`` where no row matches.
     """
     k, n = mask.shape[JAC_DIM], outputs.shape[JAC_DIM]
-    p = mask.size // k if k > 0 else 0
+    out_shape = outputs.shape[1:]
+    shape = np.broadcast_shapes(mask.shape[1:], out_shape)
+    # Position axes align to the right; the row axis must not take part.
+    pad = (1,) * (len(shape) - len(mask.shape[1:]))
+    mask = np.broadcast_to(mask.reshape(k, *pad, *mask.shape[1:]), (k, *shape))
+    p = int(np.prod(shape, dtype=int))
+    p_out = int(np.prod(out_shape, dtype=int))
     result = np.full((p, k), -1, dtype=int)
     if p == 0 or k == 0 or n == 0:
         return result.T.reshape(mask.shape)
     m = mask.reshape(k, p).T
-    o = outputs.reshape(n, p).T
+    o = outputs.reshape(n, p_out).T
+    # Output axes that only broadcast share one table, so the table is built on
+    # the output frame and every position looks up its own slot in it.
+    slot = np.broadcast_to(
+        np.arange(p_out, dtype=np.int64).reshape(out_shape), shape
+    ).reshape(-1)
     lo = int(min(m.min(), o.min()))
     stride = int(max(m.max(), o.max())) - lo + 1
-    # Offsetting each position into its own key range turns the per-position
-    # lookup into a single global binary search.
-    step = max(1, chunk // n)
+    # Offsetting each output position into its own key range turns the
+    # per-position lookup into a single global binary search.
+    keys_o = (np.arange(p_out, dtype=np.int64)[:, None] * stride + (o - lo)).reshape(-1)
+    # A stable sort keeps duplicate targets in column order, so the binary
+    # search lands on the first match.
+    order = np.argsort(keys_o, kind='stable')
+    sorted_o = keys_o[order]
+    step = max(1, chunk // k)
     for s in range(0, p, step):
-        m_b, o_b = m[s : s + step], o[s : s + step]
-        offset = np.arange(o_b.shape[0], dtype=np.int64)[:, None] * stride
-        keys_o = (offset + (o_b - lo)).reshape(-1)
-        # A stable sort keeps duplicate targets in column order, so the binary
-        # search lands on the first match.
-        order = np.argsort(keys_o, kind='stable')
-        sorted_o = keys_o[order]
-        keys_m = (offset + (m_b - lo)).reshape(-1)
+        m_b = m[s : s + step]
+        keys_m = (slot[s : s + step, None] * stride + (m_b - lo)).reshape(-1)
         pos = np.minimum(np.searchsorted(sorted_o, keys_m), sorted_o.size - 1)
         found = sorted_o[pos] == keys_m
         result[s : s + m_b.shape[0]] = np.where(found, order[pos] % n, -1).reshape(
@@ -598,19 +635,11 @@ def get_jacobian_for_reduction(jacs: Sequence[FwdJacobian], axes):
 
     masks = jtu.tree_map(rearrange, masks, kept_axes, jac_reduced_axes)
 
-    # Determine for each element the outputs.
+    # Determine for each element the outputs. Vectorized over positions; a
+    # per-position np.unique loop costs one call per kept position.
     mask = np.concatenate(masks, axis=-1)
-    out_mask_list = [np.unique(m) for m in mask]
-    out_mask_list = [m[m != -1] for m in out_mask_list]
-    max_unique = max([m.size for m in out_mask_list])
-
-    # Here we extend each mask to the same size by appending -1.
-    out_mask = np.stack(
-        [
-            np.concatenate([m, np.full(max_unique - m.size, -1, dtype=np.int32)])
-            for m in out_mask_list
-        ]
-    )
+    out_mask = per_position_sorted_unique(mask.reshape(kept_size, -1))
+    max_unique = out_mask.shape[-1]
 
     # Let's reconstruct the original order for the output mask
     out_masks = tuple(

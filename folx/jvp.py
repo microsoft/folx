@@ -296,12 +296,15 @@ def sparse_diag_jvp(
         # doing the segment sum as the output mask will be the same as the input mask.
         result_mask = laplace_args.jacobian_mask[0]
     else:
-        # Compute the resulting masks and the associated index tensors
-        result_mask, inv = np.unique(
+        # Compute the resulting masks and the associated index tensors. Axes the
+        # mask is constant along cannot tell two rows apart, so dropping them
+        # leaves both the unique rows and their order unchanged while shrinking
+        # the row comparison; the size-1 axes broadcast back below.
+        all_masks = compact_repeated_dims_except(
             np_concatenate_brdcast(laplace_args.jacobian_mask, axis=JAC_DIM),
             axis=JAC_DIM,
-            return_inverse=True,
-        )
+        )[0]
+        result_mask, inv = np.unique(all_masks, axis=JAC_DIM, return_inverse=True)
         # Merge rows sharing a mask. The mapping is static, so a gather plus
         # per-group sums beats a runtime scatter (segment_sum).
         inv = inv.reshape(-1)
