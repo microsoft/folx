@@ -131,6 +131,48 @@ class TestScatter(LaplacianTestCase):
         ]
         self.check_cases(x, cases)
 
+    def test_sparsity_breaking_scatter_add(self):
+        # A per-nucleus segment sum makes every output depend on every input, so
+        # the scatter output is densified. Tracing this must not scale with
+        # (positions x rows x dense rows).
+        n_el, n_nuc = 8, 3
+        el = np.repeat(np.arange(n_el), n_nuc)
+        nuc = np.tile(np.arange(n_nuc), n_el)
+
+        def f(x):
+            r = x.reshape(n_el, 3)
+            d = jnp.linalg.norm(r[el] - jnp.arange(n_nuc)[nuc, None], axis=-1)
+            return jnp.zeros((n_nuc,)).at[nuc].add(jnp.tanh(d))
+
+        x = np.random.randn(n_el * 3)
+        self.check_cases(x, [('nuc_segment_sum', f)], expect_weak=False)
+
+    def test_scatter_dense_materialization(self):
+        # Densifying a scatter output must agree with the dense-from-the-start
+        # path for set/add/min alike.
+        x = np.random.randn(12)
+        idx = jnp.array([0, 1, 0, 1])
+
+        def build(op):
+            def f(x):
+                r = jnp.sin(x).reshape(4, 3)
+                base = jnp.zeros((2, 3))
+                return getattr(base.at[idx], op)(r)
+
+            return f
+
+        for op in ['add', 'set', 'min', 'max']:
+            with self.subTest(op=op):
+                f = build(op)
+                dense = forward_laplacian(f, 0)(x)
+                sparse = forward_laplacian(f, 2)(x)
+                self.assert_allclose(sparse.x, dense.x)
+                self.assert_allclose(sparse.laplacian, dense.laplacian)
+                self.assert_allclose(
+                    self.full_jacobian(sparse, x.size),
+                    self.full_jacobian(dense, x.size),
+                )
+
     def test_scatter_jit_laplacian(self):
         # End-to-end check of issue #28 under jit: the scatter must retain
         # sparsity and match the dense reference.

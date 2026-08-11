@@ -129,6 +129,11 @@ class FwdJacobian(NamedTuple):
 
         outputs, mask = broadcast_except((outputs, self.mask), axis=JAC_DIM)
 
+        if isinstance(outputs, np.ndarray):
+            from .utils import static_index_mask
+
+            return static_index_mask(mask, outputs)
+
         og_shape = mask.shape[1:]
         flat_mask = mask.reshape(-1, np.prod(og_shape, dtype=int)).T
         flat_outputs = outputs.reshape(-1, np.prod(og_shape, dtype=int)).T
@@ -140,23 +145,7 @@ class FwdJacobian(NamedTuple):
             indices = jnp.where(jnp.any(matching, axis=-1), indices, -1)
             return indices
 
-        if isinstance(outputs, np.ndarray):
-            with jax.ensure_compile_time_eval():
-                if hasattr(jax.sharding, 'use_abstract_mesh'):  # jax>=0.7.2
-                    # see https://github.com/jax-ml/jax/discussions/31461
-                    with jax.sharding.use_abstract_mesh(
-                        jax.sharding.AbstractMesh((), ())
-                    ):
-                        result = np.asarray(
-                            get_indices(flat_mask, flat_outputs), dtype=int
-                        ).T
-                else:
-                    result = np.asarray(
-                        get_indices(flat_mask, flat_outputs), dtype=int
-                    ).T
-        else:
-            result = get_indices(flat_mask, flat_outputs).T
-        return result.reshape(mask.shape)
+        return get_indices(flat_mask, flat_outputs).T.reshape(mask.shape)
 
     @property
     def data_shape(self):
@@ -186,8 +175,13 @@ class FwdJacobian(NamedTuple):
         """
         if self.x0_idx is None:
             return self.data
-        ext_idx = (..., *((None,) * len(self.data_shape)))  # this is for mypy
-        return self.construct_jac_for(np.arange(self.max_n + 1)[ext_idx])
+        if self.max_n < 0:
+            return jnp.expand_dims(
+                jnp.zeros(self.data_shape, dtype=self.data.dtype), JAC_DIM
+            )
+        # Rows are indexed by the dense position they belong to, so the mask is
+        # already the index mask of the dense Jacobian.
+        return self.materialize_for_idx(self.x0_idx, self.max_n + 1)
 
     @property
     def max_n(self) -> int:

@@ -488,7 +488,9 @@ def sparse_scatter_jvp(
     runs the scatter's JVP once per output mask row with all Jacobians aligned
     to that mask. For scatter_add (linear with unit coefficients) the output
     Jacobian is instead accumulated directly from the sparse input rows,
-    which avoids materializing the aligned tangents entirely.
+    which avoids materializing the aligned tangents entirely; if the output
+    exceeds the sparsity threshold that accumulation targets the dense rows
+    directly instead of densifying a sparse intermediate.
 
     Args:
         fwd: Scatter forward function taking only the ``FwdLaplArray`` args.
@@ -530,32 +532,33 @@ def sparse_scatter_jvp(
         )
         return dense_jvp(fwd, laplace_args, in_axes=in_axes)
 
-    # Union the input dependencies per output position.
-    pos_list, dep_list = [], []
+    # Union the input dependencies per output position. Every (position,
+    # dependency) pair is encoded as a single integer key.
+    n_dep = max(max(int(a.jacobian.max_n) for a in laplace_args.arrays) + 1, 1)
+    op_positions = np.arange(op_size, dtype=np.int64).reshape(op_shape)
+
+    def broadcast_mask(arr: FwdLaplArray, shape: tuple[int, ...]) -> np.ndarray:
+        mask = arr.jacobian.mask
+        return np.broadcast_to(mask, (mask.shape[JAC_DIM], *shape))
+
+    keys = []
     if isinstance(updates, FwdLaplArray):
-        mask = updates.jacobian.mask
-        mask = np.broadcast_to(mask, (mask.shape[JAC_DIM], *updates.shape))
+        mask = broadcast_mask(updates, tuple(updates.shape))
         tpos = np.broadcast_to(target_pos, mask.shape)
         select = (mask >= 0) & (tpos >= 0)
-        pos_list.append(tpos[select])
-        dep_list.append(mask[select])
+        keys.append(tpos[select] * n_dep + mask[select])
     if isinstance(operand, FwdLaplArray):
-        mask = operand.jacobian.mask
-        mask = np.broadcast_to(mask, (mask.shape[JAC_DIM], *op_shape))
+        mask = broadcast_mask(operand, op_shape)
         keep = mask >= 0
         if is_set:
             # Overwritten positions no longer depend on the operand.
             overwritten = np.zeros((op_size,), dtype=bool)
             overwritten[target_pos[target_pos >= 0]] = True
             keep &= ~overwritten.reshape(op_shape)
-        pos = np.broadcast_to(np.arange(op_size).reshape(op_shape), mask.shape)
-        pos_list.append(pos[keep])
-        dep_list.append(mask[keep])
+        pos = np.broadcast_to(op_positions, mask.shape)
+        keys.append(pos[keep] * n_dep + mask[keep])
 
-    pos = np.concatenate(pos_list).astype(np.int64)
-    dep = np.concatenate(dep_list).astype(np.int64)
-    n_dep = int(dep.max()) + 1 if dep.size > 0 else 1
-    unique_keys = np.unique(pos * n_dep + dep)
+    unique_keys = np.unique(np.concatenate(keys))
     pos_u, dep_u = unique_keys // n_dep, unique_keys % n_dep
     counts = np.bincount(pos_u, minlength=op_size)
     max_out = int(counts.max()) if counts.size > 0 else 0
@@ -578,13 +581,12 @@ def sparse_scatter_jvp(
     if densify:
         # Densifying the small scatter output is often much cheaper than
         # materializing the inputs' dense Jacobians before the scatter.
-        n_dense = max(a.jacobian.max_n for a in laplace_args.arrays) + 1
         upd_size = int(np.prod(updates.shape, dtype=int))
         if use_direct:
-            sparse_cost = k_upd * upd_size + (max_out + n_dense) * op_size
+            sparse_cost = k_upd * upd_size + n_dep * op_size
         else:
-            sparse_cost = (max_out + 1) * (upd_size + op_size) + n_dense * op_size
-        dense_cost = n_dense * (upd_size + op_size)
+            sparse_cost = (max_out + 1) * (upd_size + op_size) + n_dep * op_size
+        dense_cost = n_dep * (upd_size + op_size)
         if sparse_cost >= dense_cost:
             logging.info(
                 f'Scatter: Output ({max_out}) reaches sparsity threshold ({sparsity_threshold}). Switching to dense.'
@@ -594,17 +596,36 @@ def sparse_scatter_jvp(
             f'Scatter: Output ({max_out}) reaches sparsity threshold ({sparsity_threshold}). Densifying after the scatter.'
         )
     max_out = max(max_out, 1)
-    out_mask_flat = np.full((max_out, op_size), -1, dtype=np.int32)
-    group_starts = np.concatenate([[0], np.cumsum(counts)[:-1]])
-    slots = np.arange(pos_u.size) - group_starts[pos_u]
-    out_mask_flat[slots, pos_u] = dep_u
-    out_mask = out_mask_flat.reshape(max_out, *op_shape)
+    # Dense output rows are indexed by the dependency itself, sparse ones by
+    # the slot the dependency occupies at its operand position.
+    n_rows = (int(dep_u.max()) + 1 if dep_u.size > 0 else 1) if densify else max_out
+
+    @functools.cache
+    def slots() -> np.ndarray:
+        """Output row of every entry of ``unique_keys``."""
+        starts = np.concatenate([[0], np.cumsum(counts)[:-1]])
+        return np.arange(pos_u.size) - starts[pos_u]
+
+    @functools.cache
+    def out_mask() -> np.ndarray:
+        """Dependency of every output row per operand position."""
+        flat = np.full((max_out, op_size), -1, dtype=np.int32)
+        flat[slots(), pos_u] = dep_u
+        return flat.reshape(max_out, *op_shape)
+
+    def slot_of(positions: np.ndarray, deps: np.ndarray) -> np.ndarray:
+        """Output row of each ``(flat operand position, dependency)`` pair."""
+        if unique_keys.size == 0:
+            return np.full(np.broadcast_shapes(positions.shape, deps.shape), -1)
+        key = np.where((deps >= 0) & (positions >= 0), positions * n_dep + deps, -1)
+        i = np.minimum(np.searchsorted(unique_keys, key), unique_keys.size - 1)
+        return np.where(unique_keys[i] == key, slots()[i], -1)
 
     # Identify which laplace args are the operand and the updates.
     arg_ids = merge(tuple(range(len(laplace_args))), (None,) * len(extra_args))  # type: ignore
 
     def to_jacobian(g):
-        jac = FwdJacobian(g, out_mask)
+        jac = FwdJacobian(g, out_mask())
         return jac.as_dense if densify else jac
 
     if use_direct:
@@ -612,49 +633,52 @@ def sparse_scatter_jvp(
         for i, arr in enumerate(laplace_args.arrays):
             if i == arg_ids[2]:
                 # Updates: bucket every sparse entry by (output row, position).
-                mask = np.broadcast_to(
-                    arr.jacobian.mask, (k_upd, *updates.shape)
-                ).astype(np.int64)
+                mask = broadcast_mask(arr, tuple(updates.shape))
                 tpos = np.broadcast_to(target_pos, mask.shape)
-                key = tpos * n_dep + mask
-                idx = np.minimum(
-                    np.searchsorted(unique_keys, key), unique_keys.size - 1
-                )
-                found = (mask >= 0) & (tpos >= 0) & (unique_keys[idx] == key)
-                bucket = np.where(found, slots[idx] * op_size + tpos, -1).reshape(-1)
+                rows = mask.astype(np.int64) if densify else slot_of(tpos, mask)
+                bucket = np.where(
+                    (rows >= 0) & (tpos >= 0), rows * op_size + tpos, -1
+                ).reshape(-1)
                 data = jnp.broadcast_to(arr.jacobian.data, mask.shape).reshape(-1)
                 gathered = materialize_by_gather(
-                    data[None], bucket[None], max_out * op_size
+                    data[None], bucket[None], n_rows * op_size
                 )
                 if gathered is not None:
                     contrib = gathered[0]
                 else:
-                    contrib = jax.ops.segment_sum(data, bucket, max_out * op_size)
-                contrib = contrib.reshape(max_out, *op_shape)
+                    contrib = jax.ops.segment_sum(data, bucket, n_rows * op_size)
+                contrib = contrib.reshape(n_rows, *op_shape)
             else:
                 # The operand passes through scatter_add unchanged.
-                contrib = arr.jacobian.materialize_for_idx(
-                    arr.jacobian.get_index_mask(out_mask), max_idx=max_out
-                )
-                contrib = jnp.broadcast_to(contrib, (max_out, *op_shape))
+                if densify:
+                    idx = arr.jacobian.mask
+                else:
+                    mask = broadcast_mask(arr, op_shape)
+                    idx = slot_of(np.broadcast_to(op_positions, mask.shape), mask)
+                contrib = arr.jacobian.materialize_for_idx(idx, max_idx=n_rows)
+                contrib = jnp.broadcast_to(contrib, (n_rows, *op_shape))
             grad_out = contrib if grad_out is None else grad_out + contrib
         lapl_tangents = tuple(
             jnp.broadcast_to(a.laplacian, a.shape) for a in laplace_args.arrays
         )
         y, lapl_y = jax.jvp(fwd, laplace_args.x, lapl_tangents)
-        return y, to_jacobian(grad_out), lapl_y
+        jac = (
+            FwdJacobian.from_dense(grad_out)
+            if densify
+            else FwdJacobian(grad_out, out_mask())
+        )
+        return y, jac, lapl_y
 
     # Align every argument's Jacobian rows with the output mask rows.
     tangents = []
     for i, arr in enumerate(laplace_args.arrays):
         if i == arg_ids[2]:  # updates
-            outputs = out_mask_flat[:, np.maximum(target_pos, 0)]
-            outputs = np.where(target_pos >= 0, outputs, -2)
+            mask = broadcast_mask(arr, tuple(updates.shape))
+            idx = slot_of(np.broadcast_to(target_pos, mask.shape), mask)
         else:  # operand
-            outputs = out_mask
-        grad_tan = arr.jacobian.materialize_for_idx(
-            arr.jacobian.get_index_mask(outputs), max_idx=max_out
-        )
+            mask = broadcast_mask(arr, op_shape)
+            idx = slot_of(np.broadcast_to(op_positions, mask.shape), mask)
+        grad_tan = arr.jacobian.materialize_for_idx(idx, max_idx=max_out)
         grad_tan = jnp.broadcast_to(grad_tan, (max_out, *arr.shape))
         lapl = jnp.broadcast_to(arr.laplacian, arr.shape)
         tangents.append(

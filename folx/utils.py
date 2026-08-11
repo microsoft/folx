@@ -114,6 +114,52 @@ def materialize_by_gather(x, idx: np.ndarray, max_idx: int):
     return gathered.sum(2)
 
 
+def static_index_mask(
+    mask: np.ndarray, outputs: np.ndarray, chunk: int = 1 << 22
+) -> np.ndarray:
+    """Maps every Jacobian row to the first output row it matches.
+
+    Equivalent to comparing every row against every output row, but performed
+    by a sort and binary search so no ``(positions, rows, outputs)`` tensor is
+    formed.
+
+    Args:
+        mask: Dependency mask of shape ``(k, *shape)``.
+        outputs: Target dependencies of shape ``(n, *shape)``.
+        chunk: Maximum number of elements per intermediate block.
+    Returns:
+        Integer array of shape ``(k, *shape)`` holding the index of the first
+        matching output row, ``-1`` where no row matches.
+    """
+    k, n = mask.shape[JAC_DIM], outputs.shape[JAC_DIM]
+    p = mask.size // k if k > 0 else 0
+    result = np.full((p, k), -1, dtype=int)
+    if p == 0 or k == 0 or n == 0:
+        return result.T.reshape(mask.shape)
+    m = mask.reshape(k, p).T
+    o = outputs.reshape(n, p).T
+    lo = int(min(m.min(), o.min()))
+    stride = int(max(m.max(), o.max())) - lo + 1
+    # Offsetting each position into its own key range turns the per-position
+    # lookup into a single global binary search.
+    step = max(1, chunk // n)
+    for s in range(0, p, step):
+        m_b, o_b = m[s : s + step], o[s : s + step]
+        offset = np.arange(o_b.shape[0], dtype=np.int64)[:, None] * stride
+        keys_o = (offset + (o_b - lo)).reshape(-1)
+        # A stable sort keeps duplicate targets in column order, so the binary
+        # search lands on the first match.
+        order = np.argsort(keys_o, kind='stable')
+        sorted_o = keys_o[order]
+        keys_m = (offset + (m_b - lo)).reshape(-1)
+        pos = np.minimum(np.searchsorted(sorted_o, keys_m), sorted_o.size - 1)
+        found = sorted_o[pos] == keys_m
+        result[s : s + m_b.shape[0]] = np.where(found, order[pos] % n, -1).reshape(
+            m_b.shape
+        )
+    return result.T.reshape(mask.shape)
+
+
 def trace_of_product(mat1: Array, mat2: Array):
     """
     Computes the trace of the product of the given matrices.

@@ -32,6 +32,27 @@ def _sub(total: Array | None, term: Array):
     return -term if total is None else total - term
 
 
+def _solve(a: Array, b: Array):
+    """Solves ``a x = b`` for a right hand side that is always a matrix.
+
+    ``jnp.linalg.solve`` reads the right hand side as a stack of vectors when it
+    has exactly one axis less than the matrix, which a batched matrix and an
+    unbatched right hand side can trigger. Leading singleton axes pad the batch
+    shape so the matrix convention is always chosen; they broadcast away and
+    leave both the result and the shared factorization of ``a`` untouched.
+
+    Args:
+        a: Matrix of shape ``(..., n, n)``.
+        b: Right hand side of shape ``(..., n, m)``.
+
+    Returns:
+        Solution of shape ``(..., n, m)``.
+    """
+    if b.ndim < a.ndim:
+        b = b.reshape(*(1,) * (a.ndim - b.ndim), *b.shape)
+    return jnp.linalg.solve(a, b)
+
+
 def _align(jac: Array, shape: tuple[int, ...]):
     """Aligns a jacobian's trailing axes with a batch shape.
 
@@ -82,9 +103,9 @@ def solve_wrapper(
     b_x, b_jac, b_lapl = _operand(b)
     if A_jac is None and b_jac is None:
         return jnp.linalg.solve(A_x, b_x)
-    # jnp.linalg.solve reads a one dimensional right hand side as a single vector
-    # and anything else as a matrix; a trailing axis makes every case a matrix,
-    # which also lets solve broadcast over the leading tangent axis
+    # A trailing axis turns a vector right hand side into a matrix, which lets
+    # solve broadcast over the leading tangent axis. The solves go through
+    # _solve so the matrix convention also holds for a batched matrix.
     vector = b_x.ndim == 1
     if vector:
         b_x = b_x[..., None]
@@ -93,18 +114,20 @@ def solve_wrapper(
     if A_jac is not None and b_jac is not None:
         A_jac, b_jac = extend_jacobians(A_jac, b_jac, axis=JAC_DIM)
 
-    y = jnp.linalg.solve(A_x, b_x)
+    y = _solve(A_x, b_x)
     jac_rhs = None if b_jac is None else _align(b_jac, y.shape)
     lapl_rhs = b_lapl
     if A_jac is not None:
         jac_rhs = _sub(jac_rhs, jnp.einsum('k...il,...lm->k...im', A_jac, y))
         lapl_rhs = _sub(lapl_rhs, jnp.einsum('...il,...lm->...im', A_lapl, y))
-    jacobian = jnp.linalg.solve(A_x, jac_rhs)
+    # At least one operand varies, so both right hand sides are populated by now.
+    assert jac_rhs is not None and lapl_rhs is not None
+    jacobian = _solve(A_x, jac_rhs)
     if A_jac is not None:
         lapl_rhs = _sub(
             lapl_rhs, 2 * jnp.einsum('k...il,k...lm->...im', A_jac, jacobian)
         )
-    laplacian = jnp.linalg.solve(A_x, lapl_rhs)
+    laplacian = _solve(A_x, lapl_rhs)
     if vector:
         y, jacobian, laplacian = y[..., 0], jacobian[..., 0], laplacian[..., 0]
     return FwdLaplArray(y, FwdJacobian.from_dense(jacobian), laplacian)
