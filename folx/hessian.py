@@ -43,19 +43,17 @@ def JHJ_via_hessian(flat_fn: Callable, flat_x: Array, grad_2d: Array):
 
 
 def JHJ_via_trace(flat_fn: Callable, flat_x: Array, grad_2d: Array):
-    # Directly copmute the trace of tr(HJJ^T)=tr(J^THJ)
-    @functools.partial(jax.vmap, in_axes=-1, out_axes=-1)
-    def vhvp(tangent):
-        def vjp(x):
-            @functools.partial(jax.vmap, in_axes=(None, -1), out_axes=-1)
-            def jvp(x, tangent):
-                return jax.jvp(flat_fn, (x,), (tangent,))[1]
+    # tr(HJJ^T)=tr(J^THJ)=sum_k J[:, k]^T H J[:, k] only needs the diagonal, so
+    # each Jacobian column contributes one second-order directional derivative.
+    # A single vmap over the columns avoids the K x K off-diagonal entries.
+    @functools.partial(jax.vmap, in_axes=-1)
+    def hvp_along(tangent):
+        def jvp(x):
+            return jax.jvp(flat_fn, (x,), (tangent,))[1]
 
-            return jvp(x, grad_2d)
+        return jax.jvp(jvp, (flat_x,), (tangent,))[1]
 
-        return jax.jvp(vjp, (flat_x,), (tangent,))[1]
-
-    return jnp.trace(vhvp(grad_2d), axis1=-2, axis2=-1)
+    return hvp_along(grad_2d).sum(axis=0)
 
 
 def JHJ_via_hvp(flat_fn: Callable, flat_x: Array, grad_2d: Array):

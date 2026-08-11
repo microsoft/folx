@@ -780,6 +780,66 @@ class TestForwardLaplacian(LaplacianTestCase):
             with self.subTest(sparsity=sparsity):
                 self.check_forward_laplacian(f, x, sparsity)
 
+    def test_reduce_prod(self):
+        # reduce_prod's Hessian is purely off-diagonal within the reduced axis,
+        # so it needs a non-diagonal Jacobian to be exercised. Negative and zero
+        # operands are covered because an exp(sum(log(.))) rewrite is invalid
+        # there, so reduce_prod itself has to be correct.
+        rng = np.random.default_rng(0)
+        x = rng.normal(size=(4, 3))
+        w = rng.normal(size=(3, 3)) / np.sqrt(3)
+        operands = np.asarray(jnp.tanh(x @ w))
+        # Shift one operand to exactly zero at the evaluation point.
+        zero_shift = np.zeros_like(operands)
+        zero_shift[1, 2] = operands[1, 2]
+
+        def positive(z):
+            return jnp.prod(1.5 + jnp.tanh(z @ w), axis=1)
+
+        def negative(z):
+            return jnp.prod(jnp.tanh(z @ w) - 1.5, axis=1)
+
+        def with_zero(z):
+            return jnp.prod(jnp.tanh(z @ w) - zero_shift, axis=1)
+
+        def two_electron(z):
+            # (n, n, 3) operands with sparse Jacobians, reduced along one axis.
+            return jnp.prod(1.0 + 0.5 * (z[:, None, :] * z[None, :, :]), axis=1)
+
+        # Pin the operand signs and the exact zero the cases are meant to cover.
+        self.assertTrue((1.5 + operands > 0).all())
+        self.assertTrue((operands - 1.5 < 0).all())
+        self.assertEqual(float(with_zero(x)[1]), 0.0)
+
+        for f in [positive, negative, with_zero, two_electron]:
+            out = f(x)
+            jac = self.jacobian(f, x).reshape(*out.shape, x.size)
+            jac = np.moveaxis(jac, -1, 0)
+            lapl = self.laplacian(f, x).reshape(out.shape)
+            for sparsity in [0, 3, x.size]:
+                with self.subTest(f=f.__name__, sparsity=sparsity):
+                    y = forward_laplacian(f, sparsity)(x)
+                    self.assertEqual(y.x.shape, out.shape)
+                    self.assert_allclose(y.x, out)
+                    self.assert_allclose(y.jacobian.dense_array, jac)
+                    self.assert_allclose(y.laplacian, lapl)
+
+    def test_reduce_prod_jhj_memory(self):
+        # tr(J^T H J) must be evaluated as K directional second derivatives, not
+        # as the diagonal of a K x K matrix. The K x K form makes the compiled
+        # kernel's temporaries grow with K^2 (~41 MB here versus ~2 MB).
+        n, h = 32, 32
+        w = jax.random.normal(jax.random.PRNGKey(0), (3, h)) / np.sqrt(3)
+        x = np.asarray(jax.random.normal(jax.random.PRNGKey(1), (n, 3)))
+
+        def f(r):
+            return jnp.prod(1.0 + 0.1 * jnp.tanh(r @ w), axis=0).sum()
+
+        fwd = forward_laplacian(f, sparsity_threshold=6)
+        compiled = jax.jit(lambda v: fwd(v).laplacian).lower(x).compile()
+        temp_mb = compiled.memory_analysis().temp_size_in_bytes / 1e6
+        self.assertLess(temp_mb, 8.0)
+
     def test_indexing_primitives(self):
         functions = [
             lambda z: jnp.stack([z, z * 2], axis=1),
