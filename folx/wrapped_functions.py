@@ -68,6 +68,12 @@ def rearrange(
     return x_rearranged[..., None]
 
 
+# Jacobian size above which fencing the value and Laplacian dots pays off.
+# Measured: fencing cuts peak memory by ~1.5x from ~9 MiB upwards and costs
+# roughly 13% runtime at ~6 MiB, where the merged dot still fuses well.
+_FENCE_JACOBIAN_BYTES = 8 * 1024 * 1024
+
+
 def _dot_general_one_constant(
     lhs: ArrayOrFwdLaplArray,
     rhs: ArrayOrFwdLaplArray,
@@ -157,12 +163,12 @@ def _dot_general_one_constant(
         proj = None
 
     h_x, h_lapl = h.x, h.laplacian
-    if jac_data.shape[JAC_DIM] >= 128 and hasattr(jax.lax, 'optimization_barrier'):
+    jac_bytes = jac_data.size * jac_data.dtype.itemsize
+    if jac_bytes >= _FENCE_JACOBIAN_BYTES and hasattr(jax.lax, 'optimization_barrier'):
         # Keep XLA's dot merger from concatenating the small x/laplacian dots
-        # into the large Jacobian dot: the resulting concatenate-rooted fusion
-        # has much worse memory throughput than a plain elementwise fusion.
-        # Only worth it for wide Jacobians; below the threshold the merged
-        # dot is neutral-to-better.
+        # into the large Jacobian dot: the merged operand carries k+2 rows
+        # instead of k and raises peak memory by up to 1.5x at no runtime
+        # benefit, which is enough to turn a fitting wave function into an OOM.
         h_x, h_lapl = jax.lax.optimization_barrier((h_x, h_lapl))
     y_x = op(h_x)
     if y_x.size * jac_data.shape[JAC_DIM] >= 2**19:
