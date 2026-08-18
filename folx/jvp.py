@@ -27,6 +27,7 @@ from .utils import (
     broadcast_except,
     broadcast_mask_to_jacobian,
     compact_repeated_dims_except,
+    compile_time_eval,
     extend_jacobians,
     get_jacobian_for_reduction,
     materialize_by_gather,
@@ -118,7 +119,7 @@ def sparse_sum_jvp(
         max_out = (np.diff(A_sorted, axis=axis) > 0).sum(axis).max() + 1
         # move axis to back so we can use vectorize
         A_sorted = np.moveaxis(A_sorted, axis, -1)
-        with jax.ensure_compile_time_eval():
+        with compile_time_eval():
             unique = functools.partial(jnp.unique, size=max_out, fill_value=-1)
             unique = jnp.vectorize(unique, signature='(n)->(m)')
             idx_out = unique(A_sorted)
@@ -350,7 +351,7 @@ def sparse_index_jvp(
         # An index operation is expected to be static. If it is not, we will default to
         # materializing everything.
         # https://github.com/google/jax/pull/3370
-        with jax.ensure_compile_time_eval():
+        with compile_time_eval():
             extra_filled = jtu.tree_map(
                 lambda x: jnp.full(
                     x.shape if isinstance(x, jax.Array) else (), -1, dtype=jnp.int32
@@ -439,7 +440,7 @@ def _scatter_target_positions(
         Integer array of shape ``updates_shape`` with flat operand positions;
         ``-1`` marks dropped (out-of-bounds) updates.
     """
-    with jax.ensure_compile_time_eval():
+    with compile_time_eval():
 
         def scatter_zeros(u):
             return jax.lax.scatter_add(

@@ -4,6 +4,7 @@ from typing import Any, Callable, Sequence, TypeVar
 
 import jax
 
+from folx.utils import compile_time_eval
 from folx.vmap import batched_vmap
 
 from .memory import compute_memory
@@ -43,7 +44,7 @@ def auto_batched_vmap(
         try:
             single_fn = vmapped_fn(max_batch_size=1)
             pair_fn = vmapped_fn(max_batch_size=2)
-            with jax.ensure_compile_time_eval():
+            with compile_time_eval():
                 single_cost = compute_memory(
                     single_fn,
                     *args,

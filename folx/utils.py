@@ -1,3 +1,4 @@
+import contextlib
 import functools
 import logging
 from typing import Sequence, Type, TypeVar
@@ -26,6 +27,40 @@ from .api import (
 )
 
 T = TypeVar('T')
+
+
+def _drop_manual_mesh() -> contextlib.AbstractContextManager:
+    """Context manager that hides manual mesh axes.
+
+    Returns:
+        Context manager replacing the mesh of an enclosing ``jax.shard_map`` by
+        an empty one, or a no-op one if there is no manual mesh or the installed
+        jax version does not support switching it.
+    """
+    use_abstract_mesh = getattr(jax.sharding, 'use_abstract_mesh', None)
+    get_abstract_mesh = getattr(jax.sharding, 'get_abstract_mesh', None)
+    if use_abstract_mesh is None or get_abstract_mesh is None:
+        return contextlib.nullcontext()
+    mesh = get_abstract_mesh()
+    if not getattr(mesh, 'manual_axes', ()):
+        return contextlib.nullcontext()
+    try:
+        return use_abstract_mesh(type(mesh)((), ()))
+    except TypeError:
+        return contextlib.nullcontext()
+
+
+@contextlib.contextmanager
+def compile_time_eval():
+    """Evaluates operations eagerly, outside of any manual mesh.
+
+    Sparsity patterns are computed eagerly at trace time. Inside
+    ``jax.shard_map`` the axes of the surrounding mesh are manual, and eager
+    evaluation under such a mesh is only possible for a single device, so the
+    mesh is dropped for the duration of the block.
+    """
+    with jax.ensure_compile_time_eval(), _drop_manual_mesh():
+        yield
 
 
 def bound_axis(arr: np.ndarray, axis):
@@ -711,7 +746,7 @@ def broadcast_mask_to_jacobian(mask: PyTree[np.ndarray], jacobian: PyTree[Array]
         def brdcast(x):
             return jnp.broadcast_to(x, target_shape)
 
-        with jax.ensure_compile_time_eval():
+        with compile_time_eval():
             return np.asarray(brdcast(m), dtype=m.dtype)
 
     # As mask may be a pytree prefix of jacobian, each mask leaf is broadcast

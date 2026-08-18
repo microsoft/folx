@@ -26,6 +26,7 @@ from .utils import (
     add_vmap_jacobian_dim,
     array_wise_flat_wrap,
     compact_repeated_dims_except,
+    compile_time_eval,
     flat_wrap,
     get_reduced_jacobians,
     jac_jacT,
@@ -309,7 +310,7 @@ def find_out_idx(lapl_args: FwdLaplArgs, in_axes, flags: FunctionFlags, threshol
     if not lapl_args.any_jacobian_weak:
         return None, True
 
-    with jax.ensure_compile_time_eval():
+    with compile_time_eval():
         vmap_seq, (squeezed_masks,) = vmap_sequences_and_squeeze(
             ([j.mask for j in lapl_args.jacobian],),
             (

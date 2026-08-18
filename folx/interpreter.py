@@ -38,7 +38,7 @@ from .api import (
     FwdLaplArray,
     PyTree,
 )
-from .utils import LoggingPrefix, extract_jacobian_mask, ravel
+from .utils import LoggingPrefix, compile_time_eval, extract_jacobian_mask, ravel
 from .wrapped_functions import get_laplacian, wrap_forward_laplacian
 
 R = TypeVar('R', bound=PyTree[Array])
@@ -228,7 +228,7 @@ def eval_jaxpr_with_forward_laplacian(
                 # https://github.com/google/jax/pull/3370
                 if all(not isinstance(x, Tracer) for x in invals) and enable_sparsity:
                     try:
-                        with jax.ensure_compile_time_eval():
+                        with compile_time_eval():
                             outvals = eqn.primitive.bind(
                                 *subfuns, *invals, **bind_params
                             )
@@ -239,7 +239,6 @@ def eval_jaxpr_with_forward_laplacian(
                                 'We switch to tracing rather than eager execution. This may impact sparsity propagation.\n'
                                 f'{e}'
                             )
-                            exit()
                         outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
                 else:
                     outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
