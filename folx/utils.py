@@ -143,7 +143,10 @@ def materialize_by_gather(x, idx: np.ndarray, max_idx: int):
     trailing = (1,) * (x.ndim - 2)
     take = take.reshape(p, max_idx * n_slots, *trailing)
     keep = jnp.asarray(take >= 0)
-    gathered = jnp.take_along_axis(x, jnp.asarray(np.maximum(take, 0)), axis=1)
+    full = jnp.broadcast_to(
+        jnp.asarray(np.maximum(take, 0)), (p, max_idx * n_slots, *x.shape[2:])
+    )
+    gathered = jnp.take_along_axis(x, full, axis=1)
     gathered = jnp.where(keep, gathered, 0)
     gathered = gathered.reshape(p, max_idx, n_slots, *x.shape[2:])
     return gathered.sum(2)
