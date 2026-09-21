@@ -371,6 +371,10 @@ def remove_zero_entries(
     if dense_out:
         return lapl_args, out_idx, None
 
+    # find_out_idx squeezes size-one position axes. Restore them before
+    # indexing the original operands, whose last axis is contracted.
+    frame = np.broadcast_shapes(*(arg.x.shape[:-1] for arg in lapl_args.arrays))
+    out_idx = out_idx.reshape(out_idx.shape[JAC_DIM], *frame)
     mask = (out_idx != -1).any(0)
     if mask.sum() > 0.5 * mask.size:
         # this is a heuristic to avoid having unnecessary indexing overhead for
