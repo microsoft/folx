@@ -187,7 +187,7 @@ class FwdJacobian(NamedTuple):
     @property
     def max_n(self) -> int:
         if self.x0_idx is not None:
-            return int(np.max(self.x0_idx))
+            return int(np.max(self.x0_idx, initial=-1))
         return self.data.shape[JAC_DIM]
 
     @property

@@ -105,9 +105,10 @@ def test_dense_array(shape, k):
     np.testing.assert_allclose(dense, expected, rtol=1e-12, atol=1e-12)
 
 
-def test_dense_array_all_invalid():
+@pytest.mark.parametrize('rows', [0, 2])
+def test_dense_array_all_invalid(rows):
     """A Jacobian without any dependency densifies to a single zero row."""
-    mask = np.full((2, 3), -1)
-    dense = FwdJacobian(jnp.ones((2, 3)), mask).dense_array
+    mask = np.full((rows, 3), -1, dtype=int)
+    dense = FwdJacobian(jnp.ones((rows, 3)), mask).dense_array
     assert dense.shape == (1, 3)
     np.testing.assert_allclose(dense, 0)
