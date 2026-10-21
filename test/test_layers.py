@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
+import pytest
 from laplacian_testcase import LaplacianTestCase
 from packaging.version import Version
 from parameterized import parameterized
@@ -241,6 +242,10 @@ class TestForwardLaplacian(LaplacianTestCase):
                         y.laplacian, self.laplacian(f, x).reshape(out_shape)
                     )
 
+    @pytest.mark.skipif(
+        Version(jax.__version__) < Version('0.12'),
+        reason='older XLA CPU backends may fail bf16 x bf16 -> f32 dots',
+    )
     def test_matmul_preferred_element_type(self):
         # The sparse mul-sum path must honor dot_general's accumulation dtype.
         # Seeded and scaled: bf16 rounding through exp is sensitive to magnitude.
@@ -251,11 +256,6 @@ class TestForwardLaplacian(LaplacianTestCase):
             return jax.lax.dot_general(
                 s, x, (((1,), (0,)), ((), ())), preferred_element_type=jnp.float32
             )
-
-        try:
-            jax.block_until_ready(jax.jit(f)(x))
-        except Exception as e:  # old jaxlib CPU backends lack bf16->f32 dots
-            self.skipTest(f'bf16 dot_general with f32 accumulation unsupported: {e}')
 
         for sparsity in [0, x.size]:
             with self.subTest(sparsity=sparsity):
