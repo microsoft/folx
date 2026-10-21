@@ -13,6 +13,7 @@ import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
 
+from ._compat import mark_varying_like
 from .ad import is_tree_complex
 from .api import (
     JAC_DIM,
@@ -21,7 +22,6 @@ from .api import (
     FwdJacobian,
     FwdLaplArray,
 )
-from .utils import mark_varying_like
 
 
 @jax.custom_jvp

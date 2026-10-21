@@ -28,7 +28,7 @@ def f(x):
 
 fwd_f = forward_laplacian(f)
 result = fwd_f(np.arange(3, dtype=float))
-result.x # f(x) 3
+result.x # f(x) 5
 result.jacobian.dense_array # J_f(x) [0, 2, 4]
 result.laplacian # tr(H_f(x)) 6
 ```
@@ -199,8 +199,6 @@ def f(x):
 batched_f = batched_vmap(f, max_batch_size=64)
 ```
 
-As an experimental tool, one can use `folx.experimental.auto_batched_vmap` which will automatically determine the optimal batch size based on the available memory. Though, this is highly experimental and may be a bad estimate.
-
 ## Citation
 If you find work helpful, please consider citing it as
 ```
@@ -208,8 +206,8 @@ If you find work helpful, please consider citing it as
   author = {Nicholas Gao and Jonas Köhler and Adam Foster},
   title = {folx - Forward Laplacian for JAX},
   url = {http://github.com/microsoft/folx},
-  version = {0.2.5},
-  year = {2023},
+  version = {0.2.30},
+  year = {2026},
 }
 ```
 as well as the original forward laplacian:

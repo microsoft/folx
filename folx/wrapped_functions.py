@@ -1,23 +1,15 @@
 import functools
 import logging
+from collections.abc import Callable, Sequence
 from typing import Any, Literal, ParamSpec, TypeVar, overload
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
-try:
-    from jax.extend.core import Primitive
-except ImportError:
-    from jax.core import Primitive  # type: ignore[import-error]
-
-try:
-    from jax.extend.core.primitives import add_jaxvals_p as add_any_p
-except ImportError:
-    from jax._src.ad_util import add_any_p  # type: ignore[import-error]
-
 from folx.ad import is_tree_complex
 
+from ._compat import Jaxpr, Primitive, add_any_p, open_jaxpr
 from .api import (
     JAC_DIM,
     Array,
@@ -32,9 +24,11 @@ from .custom_hessian import (
     complex_abs_jac_hessian_jac,
     div_jac_hessian_jac,
 )
+from .hessian import _has_duplicate_x0_idx
 from .linear_solve import inv_wrapper, solve_wrapper
 from .slogdet import det_wrapper, slogdet_wrapper
 from .wrapper import (
+    is_elementwise,
     warp_without_fwd_laplacian,
     wrap_elementwise,
     wrap_forward_laplacian,
@@ -400,7 +394,7 @@ _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
     ),
     jax.lax.pow_p: wrap_forward_laplacian(jax.lax.pow, in_axes=()),
     jax.lax.integer_pow_p: wrap_forward_laplacian(jax.lax.integer_pow, in_axes=()),
-    jax.lax.sign_p: warp_without_fwd_laplacian(jax.lax.sign),
+    jax.lax.sign_p: warp_without_fwd_laplacian(jax.lax.sign, in_axes=()),
     jax.lax.reduce_sum_p: wrap_forward_laplacian(
         jax.lax.reduce_sum_p.bind,
         flags=FunctionFlags.SUMMATION,
@@ -459,9 +453,9 @@ _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
         jax.lax.complex, flags=FunctionFlags.LINEAR, in_axes=()
     ),
     # Piecewise constant: zero derivative almost everywhere.
-    jax.lax.floor_p: warp_without_fwd_laplacian(jax.lax.floor),
-    jax.lax.ceil_p: warp_without_fwd_laplacian(jax.lax.ceil),
-    jax.lax.round_p: warp_without_fwd_laplacian(jax.lax.round),
+    jax.lax.floor_p: warp_without_fwd_laplacian(jax.lax.floor, in_axes=()),
+    jax.lax.ceil_p: warp_without_fwd_laplacian(jax.lax.ceil, in_axes=()),
+    jax.lax.round_p: warp_without_fwd_laplacian(jax.lax.round, in_axes=()),
     jax.lax.argmax_p: warp_without_fwd_laplacian(jax.lax.argmax_p.bind),
     jax.lax.argmin_p: warp_without_fwd_laplacian(jax.lax.argmin_p.bind),
     jax.lax.cummax_p: wrap_forward_laplacian(
@@ -553,20 +547,22 @@ _LAPLACE_FN_REGISTRY: dict[Primitive | str, ForwardLaplacian] = {
         flags=FunctionFlags.LINEAR | FunctionFlags.SCATTER,
         name='scatter_min',
     ),
-    jax.lax.stop_gradient_p: warp_without_fwd_laplacian(jax.lax.stop_gradient),
-    jax.lax.eq_p: warp_without_fwd_laplacian(jax.lax.eq),
-    jax.lax.lt_p: warp_without_fwd_laplacian(jax.lax.lt),
-    jax.lax.le_p: warp_without_fwd_laplacian(jax.lax.le),
-    jax.lax.gt_p: warp_without_fwd_laplacian(jax.lax.gt),
-    jax.lax.ge_p: warp_without_fwd_laplacian(jax.lax.ge),
-    jax.lax.ne_p: warp_without_fwd_laplacian(jax.lax.ne),
-    jax.lax.xor_p: warp_without_fwd_laplacian(jax.lax.bitwise_xor),
-    jax.lax.not_p: warp_without_fwd_laplacian(jax.lax.bitwise_not),
-    jax.lax.and_p: warp_without_fwd_laplacian(jax.lax.bitwise_and),
-    jax.lax.or_p: warp_without_fwd_laplacian(jax.lax.bitwise_or),
-    jax.lax.is_finite_p: warp_without_fwd_laplacian(jax.lax.is_finite),
+    jax.lax.stop_gradient_p: warp_without_fwd_laplacian(
+        jax.lax.stop_gradient, in_axes=()
+    ),
+    jax.lax.eq_p: warp_without_fwd_laplacian(jax.lax.eq, in_axes=()),
+    jax.lax.lt_p: warp_without_fwd_laplacian(jax.lax.lt, in_axes=()),
+    jax.lax.le_p: warp_without_fwd_laplacian(jax.lax.le, in_axes=()),
+    jax.lax.gt_p: warp_without_fwd_laplacian(jax.lax.gt, in_axes=()),
+    jax.lax.ge_p: warp_without_fwd_laplacian(jax.lax.ge, in_axes=()),
+    jax.lax.ne_p: warp_without_fwd_laplacian(jax.lax.ne, in_axes=()),
+    jax.lax.xor_p: warp_without_fwd_laplacian(jax.lax.bitwise_xor, in_axes=()),
+    jax.lax.not_p: warp_without_fwd_laplacian(jax.lax.bitwise_not, in_axes=()),
+    jax.lax.and_p: warp_without_fwd_laplacian(jax.lax.bitwise_and, in_axes=()),
+    jax.lax.or_p: warp_without_fwd_laplacian(jax.lax.bitwise_or, in_axes=()),
+    jax.lax.is_finite_p: warp_without_fwd_laplacian(jax.lax.is_finite, in_axes=()),
     jax.lax.convert_element_type_p: dtype_conversion,
-    'sign': warp_without_fwd_laplacian(jax.lax.sign),
+    'sign': warp_without_fwd_laplacian(jax.lax.sign, in_axes=()),
     'logaddexp': wrap_forward_laplacian(jnp.logaddexp, in_axes=()),
     'sigmoid': wrap_forward_laplacian(jax.nn.sigmoid, in_axes=()),
     'softplus': wrap_forward_laplacian(jax.nn.softplus, in_axes=()),
@@ -681,3 +677,93 @@ if hasattr(jax.lax, 'tile_p'):
             name='tile',
         ),
     )
+
+
+def is_elementwise_jaxpr(jaxpr: Jaxpr) -> bool:
+    """Checks whether a jaxpr only consists of elementwise operations.
+
+    Args:
+        jaxpr: Open jaxpr.
+
+    Returns:
+        Whether every equation is a registered elementwise primitive, a
+        broadcast of a scalar, or a call of an elementwise sub-jaxpr.
+    """
+    for eqn in jaxpr.eqns:
+        name = eqn.primitive.name
+        if name in ('jit', 'pjit', 'custom_jvp_call'):
+            key = 'jaxpr' if 'jaxpr' in eqn.params else 'call_jaxpr'
+            if not is_elementwise_jaxpr(open_jaxpr(eqn.params[key])[0]):
+                return False
+        elif name == 'broadcast_in_dim':
+            if eqn.invars[0].aval.shape != ():
+                return False
+        elif not is_registered(eqn.primitive) or not is_elementwise(
+            _LAPLACE_FN_REGISTRY[eqn.primitive]
+        ):
+            return False
+    return True
+
+
+def elementwise_forward_laplacian(
+    fn: Callable[[Array], Sequence[Array]], x: FwdLaplArray
+) -> list[FwdLaplArray]:
+    """Forward Laplacian of an elementwise function of a single ``FwdLaplArray``.
+
+    As the Hessian of an elementwise function is diagonal, the Laplacian
+    contribution reduces to ``f''(x) * sum_k J_k**2``, which requires unique
+    sparse Jacobian indices per element. The Jacobian keeps the sparsity of ``x``.
+
+    Args:
+        fn: Elementwise function returning a sequence of arrays shaped like ``x``.
+        x: Input.
+
+    Returns:
+        List of outputs of ``fn`` as ``FwdLaplArray``.
+    """
+    jac = x.jacobian.data
+    ones = jnp.ones_like(x.x)
+    y, lapl = jax.jvp(fn, (x.x,), (x.laplacian,))
+    jac_y = jax.vmap(
+        lambda t: jax.jvp(fn, (x.x,), (t,))[1], in_axes=JAC_DIM, out_axes=JAC_DIM
+    )(jac)
+    d2 = jax.jvp(lambda z: jax.jvp(fn, (z,), (ones,))[1], (x.x,), (ones,))[1]
+    sq_norm = (jac * jac).sum(axis=JAC_DIM)
+    return [
+        FwdLaplArray(y_, FwdJacobian(j, x.jacobian.x0_idx), l + d * sq_norm)
+        for y_, j, l, d in zip(y, jac_y, lapl, d2)
+    ]
+
+
+def custom_jvp_laplacian(
+    fn: Callable[..., Sequence[Array]],
+    primal: Jaxpr,
+    args: Sequence[ArrayOrFwdLaplArray],
+    sparsity_threshold: int,
+) -> list[ArrayOrFwdLaplArray]:
+    """Forward Laplacian of a ``custom_jvp`` function, using its custom JVP rule.
+
+    Elementwise functions of a single ``FwdLaplArray`` keep their Jacobian
+    sparsity; all others are handled by the general rule.
+
+    Args:
+        fn: The ``custom_jvp`` function, binding the ``custom_jvp_call``.
+        primal: Primal jaxpr of the ``custom_jvp`` function.
+        args: Inputs to ``fn``.
+        sparsity_threshold: Sparsity threshold.
+
+    Returns:
+        Outputs of ``fn``.
+    """
+    lapl_idx = [i for i, a in enumerate(args) if isinstance(a, FwdLaplArray)]
+    shapes = {tuple(v.aval.shape) for v in primal.outvars}
+    shapes |= {tuple(args[i].shape) for i in lapl_idx}
+    if len(lapl_idx) == 1 and len(shapes) == 1 and is_elementwise_jaxpr(primal):
+        i = lapl_idx[0]
+        x = args[i]
+        assert isinstance(x, FwdLaplArray)
+        if not _has_duplicate_x0_idx(x.jacobian.x0_idx):
+            return elementwise_forward_laplacian(
+                lambda z: fn(*args[:i], z, *args[i + 1 :]), x
+            )
+    return wrap_forward_laplacian(fn)(args, {}, sparsity_threshold=sparsity_threshold)

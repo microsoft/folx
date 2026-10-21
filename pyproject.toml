@@ -22,11 +22,14 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Scientific/Engineering :: Chemistry",
     "Topic :: Scientific/Engineering :: Physics",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    "jax>=0.4.10; python_version < '3.13'",
+    "jax>=0.4.27; python_version < '3.13'",
     "jax>=0.4.34; python_version >= '3.13' and python_version < '3.14'",
     "jax>=0.7.2; python_version >= '3.14'",
     "jaxtyping>=0.2.36",
@@ -54,13 +57,12 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
-    "flax>=0.10.2",
     # The cuda13 extra was only added in jax 0.7.x; pinning it on jax floors
     # that don't have it makes `--resolution lowest-direct` bump jax past its
     # production floor and produce a jax/jaxlib ABI mismatch. Use cuda12 for
     # older python (which still ships an old-jax floor) and cuda13 for 3.14.
     "ipykernel>=7.3.0",
-    "jax[cuda12]>=0.4.10; python_version < '3.13'",
+    "jax[cuda12]>=0.4.27; python_version < '3.13'",
     "jax[cuda12]>=0.4.34; python_version >= '3.13' and python_version < '3.14'",
     "jax[cuda13]>=0.7.2; python_version >= '3.14'",
     "parameterized>=0.9.0",

@@ -135,22 +135,40 @@ def wrap_forward_laplacian(
                 lapl_y,
             )
 
+    setattr(new_fn, 'in_axes', in_axes)
     return new_fn
 
 
-def warp_without_fwd_laplacian(fn) -> ForwardLaplacian:
+def is_elementwise(rule: ForwardLaplacian) -> bool:
+    """Checks whether a forward Laplacian rule is elementwise.
+
+    Args:
+        rule: Forward Laplacian rule.
+
+    Returns:
+        Whether the rule was created with ``in_axes=()``.
+    """
+    return getattr(rule, 'in_axes', None) == ()
+
+
+def warp_without_fwd_laplacian(fn, in_axes: Axes = None) -> ForwardLaplacian:
     """
     Decorator that removes the Laplacian state from the arguments of a function.
+
+    Args:
+        fn: Function without derivatives w.r.t. its inputs.
+        in_axes: Axes needed for the computation; ``()`` marks it as elementwise.
     """
 
     def wrapped(args, kwargs, sparsity_threshold: int):
         args, kwargs = jax.tree_util.tree_map(
-            lambda a: (a.x if isinstance(a, FwdLaplArray) else a),
+            lambda a: a.x if isinstance(a, FwdLaplArray) else a,
             (args, kwargs),
             is_leaf=IS_LPL_ARR,
         )
         return fn(*args, **kwargs)
 
+    setattr(wrapped, 'in_axes', in_axes)
     return wrapped
 
 
@@ -173,4 +191,5 @@ def wrap_elementwise(fn) -> ForwardLaplacian:
 
         return inner(args[0])
 
+    setattr(wrapped, 'in_axes', ())
     return wrapped

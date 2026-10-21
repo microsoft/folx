@@ -79,30 +79,6 @@ def tree_shapes(tree: PyTree[Array]) -> list[tuple[int, ...]]:
     return [l.shape for l in leaves]
 
 
-def varying_axes(x: jax.Array) -> tuple[int | str, ...]:
-    if not hasattr(jax, 'typeof'):
-        return ()
-
-    typ = jax.typeof(x)
-    manual_axis_type = getattr(typ, 'manual_axis_type', None)
-    if manual_axis_type is not None:
-        return tuple(getattr(manual_axis_type, 'varying', ()))
-
-    return tuple(getattr(typ, 'vma', ()))
-
-
-def mark_varying_like(x: jax.Array, like: jax.Array) -> jax.Array:
-    axes = varying_axes(like)
-    if not axes:
-        return x
-
-    if hasattr(jax.lax, 'pcast'):
-        return jax.lax.pcast(x, axes, to='varying')
-    if hasattr(jax.lax, 'pvary'):
-        return jax.lax.pvary(x, axes)
-    return x
-
-
 def materialize_by_gather(x, idx: np.ndarray, max_idx: int):
     """Materializes Jacobian rows by a static gather instead of a runtime scatter.
 

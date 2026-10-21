@@ -1,9 +1,8 @@
 import functools
 import logging
-import re
 import warnings
 from collections import defaultdict
-from typing import TYPE_CHECKING, Callable, ParamSpec, Sequence, TypeVar
+from typing import Callable, ParamSpec, Sequence, TypeVar
 
 import jax
 import jax.numpy as jnp
@@ -12,23 +11,18 @@ import numpy as np
 from jax.core import Atom, Tracer
 from jax.typing import ArrayLike
 
-if TYPE_CHECKING:
-    from jax.extend.core import ClosedJaxpr, Jaxpr, JaxprEqn, Literal, Var
-    from jax.extend.source_info_util import summarize
-else:
-    try:
-        from jax.extend.core import ClosedJaxpr, Jaxpr, JaxprEqn, Literal, Var
-        from jax.extend.source_info_util import summarize
-    except ImportError:
-        from jax._src.source_info_util import summarize  # type: ignore[import-error]
-        from jax.core import (  # type: ignore[import-error]
-            ClosedJaxpr,
-            Jaxpr,
-            JaxprEqn,
-            Literal,
-            Var,
-        )
-
+from ._compat import (
+    CUSTOM_VJP_PRIMITIVES,
+    ClosedJaxpr,
+    Jaxpr,
+    JaxprEqn,
+    Literal,
+    Var,
+    custom_vjp_primal,
+    open_jaxpr,
+    split_bind_params,
+    summarize,
+)
 from .api import (
     IS_LEAF,
     IS_LPL_ARR,
@@ -38,41 +32,12 @@ from .api import (
     FwdLaplArray,
     PyTree,
 )
-from .utils import LoggingPrefix, compile_time_eval, extract_jacobian_mask, ravel
-from .wrapped_functions import get_laplacian, wrap_forward_laplacian
+from .control_flow import scan_laplacian, while_laplacian
+from .utils import LoggingPrefix, compile_time_eval, ravel
+from .wrapped_functions import custom_jvp_laplacian, get_laplacian
 
 R = TypeVar('R', bound=PyTree[Array])
 P = ParamSpec('P')
-
-
-def _version_key(version: str) -> tuple[int, ...]:
-    return tuple(
-        int(match.group(0))
-        for part in version.split('.')
-        if (match := re.match(r'\d+', part)) is not None
-    )
-
-
-_USES_DICT_BIND_PARAMS = _version_key(jax.__version__) >= (0, 9, 2)
-
-
-def _split_bind_params(primitive, params):
-    """Normalize JAX primitive bind params across old and new JAX APIs."""
-
-    bind_params = primitive.get_bind_params(params)
-    if _USES_DICT_BIND_PARAMS:
-        if not isinstance(bind_params, dict):
-            raise TypeError(
-                'Expected primitive.get_bind_params() to return a dict for '
-                f'JAX >= 0.9.2, got {bind_params!r}.'
-            )
-        return (), bind_params
-    if not isinstance(bind_params, tuple) or len(bind_params) != 2:
-        raise TypeError(
-            'Expected primitive.get_bind_params() to return a 2-tuple for '
-            f'JAX < 0.9.2, got {bind_params!r}.'
-        )
-    return bind_params
 
 
 class JaxExprEnvironment:
@@ -130,58 +95,16 @@ def eval_jaxpr_with_forward_laplacian(
     enable_sparsity = sparsity_threshold > 0
     env = JaxExprEnvironment(jaxpr, consts, *args)
 
-    def eval_scan(eqn: JaxprEqn, invals):
-        n_carry, n_const = eqn.params['num_carry'], eqn.params['num_consts']
-        in_const, in_carry, in_inp = (
-            invals[:n_const],
-            invals[n_const : n_carry + n_const],
-            invals[n_const + n_carry :],
-        )
-        carry_merge = extract_jacobian_mask(in_carry)
-        assert all(isinstance(x, Array) for x in in_inp), (
-            'Scan does not support scanning over input depenedent tensors.\nPlease unroll the loop.'
+    def eval_sub_jaxpr(jaxpr, consts, *args):
+        return eval_jaxpr_with_forward_laplacian(
+            jaxpr, consts, *args, sparsity_threshold=sparsity_threshold
         )
 
-        def wrapped(carry, x):
-            result = eval_jaxpr_with_forward_laplacian(
-                eqn.params['jaxpr'].jaxpr,
-                (),
-                *in_const,
-                *carry_merge(carry),
-                *x,
-                sparsity_threshold=sparsity_threshold,
-            )
-            return result[:n_carry], result[n_carry:]
-
-        first_carry, first_y = wrapped(in_carry, jtu.tree_map(lambda x: x[0], in_inp))
-        # Check whether jacobian sparsity matches
-        for a, b in zip(in_carry, first_carry):
-            if not isinstance(a, type(b)):
-                raise TypeError(f'Type mismatch in scan: {type(a)} != {type(b)}')
-            if isinstance(a, FwdLaplArray):
-                if not np.all(a.jacobian.x0_idx == b.jacobian.x0_idx):  # type: ignore
-                    raise ValueError('Jacobian sparsity mismatch in scan.')
-        carry, y = jax.lax.scan(
-            wrapped,  # type: ignore
-            in_carry,
-            in_inp,
-            length=eqn.params['length'],
-            reverse=eqn.params['reverse'],
-            unroll=eqn.params['unroll'],
-        )
-        carry = [
-            a._replace(jacobian=a.jacobian._replace(x0_idx=b.jacobian.x0_idx))  # type: ignore
-            if isinstance(a, FwdLaplArray)
-            else a
-            for a, b in zip(carry, first_carry)
-        ]
-        y = [
-            a._replace(jacobian=a.jacobian._replace(x0_idx=b.jacobian.x0_idx))  # type: ignore
-            if isinstance(a, FwdLaplArray)
-            else a
-            for a, b in zip(y, first_y)
-        ]
-        return *carry, *y
+    def eval_custom_vjp(eqn: JaxprEqn, invals):
+        # A VJP rule cannot provide forward-mode derivatives, so we
+        # differentiate the primal function instead.
+        primal, consts, _ = custom_vjp_primal(eqn)
+        return eval_sub_jaxpr(primal, consts, *invals)
 
     def eval_pjit(eqn: JaxprEqn, invals):
         name = eqn.params['name']
@@ -200,15 +123,14 @@ def eval_jaxpr_with_forward_laplacian(
         )
 
     def eval_custom_jvp(eqn: JaxprEqn, invals):
-        subfuns, args = _split_bind_params(eqn.primitive, eqn.params)
+        subfuns, args = split_bind_params(eqn.primitive, eqn.params)
         fn = functools.partial(eqn.primitive.bind, *subfuns, **args)
+        primal = open_jaxpr(eqn.params['call_jaxpr'])[0]
         with LoggingPrefix(f'({summarize(eqn.source_info)})'):
-            return wrap_forward_laplacian(fn)(
-                invals, {}, sparsity_threshold=sparsity_threshold
-            )
+            return custom_jvp_laplacian(fn, primal, invals, sparsity_threshold)
 
     def eval_laplacian(eqn: JaxprEqn, invals):
-        subfuns, params = _split_bind_params(eqn.primitive, eqn.params)
+        subfuns, params = split_bind_params(eqn.primitive, eqn.params)
         with LoggingPrefix(f'({summarize(eqn.source_info)})'):
             fn = get_laplacian(eqn.primitive, True)
             return fn(
@@ -220,7 +142,7 @@ def eval_jaxpr_with_forward_laplacian(
         # Eval expression
         try:
             if all(not isinstance(x, FwdLaplArray) for x in invals):
-                subfuns, bind_params = _split_bind_params(eqn.primitive, eqn.params)
+                subfuns, bind_params = split_bind_params(eqn.primitive, eqn.params)
                 # If non of the inputs were dependent on an FwdLaplArray,
                 # we can just use the regular primitive. This will avoid
                 # omnistaging. While this could cost us some memory and speed,
@@ -243,11 +165,15 @@ def eval_jaxpr_with_forward_laplacian(
                 else:
                     outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
             elif eqn.primitive.name == 'scan':
-                outvals = eval_scan(eqn, invals)
+                outvals = scan_laplacian(eqn, invals, eval_sub_jaxpr)
             elif eqn.primitive.name in ('jit', 'pjit'):
                 outvals = eval_pjit(eqn, invals)
+            elif eqn.primitive.name == 'while':
+                outvals = while_laplacian(eqn, invals, eval_sub_jaxpr)
             elif eqn.primitive.name == 'custom_jvp_call':
                 outvals = eval_custom_jvp(eqn, invals)
+            elif eqn.primitive.name in CUSTOM_VJP_PRIMITIVES:
+                outvals = eval_custom_vjp(eqn, invals)
             else:
                 outvals = eval_laplacian(eqn, invals)
         except Exception as e:

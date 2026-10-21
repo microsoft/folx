@@ -3,7 +3,7 @@ import jax.flatten_util as jfu
 import jax.numpy as jnp
 import jax.tree_util as jtu
 
-from .utils import mark_varying_like
+from ._compat import mark_varying_like
 
 
 def is_tree_complex(tree):
