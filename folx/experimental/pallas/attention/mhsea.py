@@ -11,6 +11,7 @@ from .utils import (
     compiler_params,
     compute_q_and_kv_block_len,
     create_grid,
+    dot,
     get_lse_block_spec,
     get_mask_block_spec,
     get_value_or_laplacian_block_spec,
@@ -133,12 +134,12 @@ def mhsea_kernel(
     k = jnp.where(kv_mask[:, None], k_ref[:, :], 0.0)
     e = e_ref[:, :]
     v = jnp.where(kv_mask[:, None], v_ref[:, :], 0.0)
-    s = jnp.where(square_mask, pl.dot(q, k, trans_b=True) + e, -big_number(q.dtype))
+    s = jnp.where(square_mask, dot(q, k, trans_b=True) + e, -big_number(q.dtype))
     max_val = jnp.max(
         s, axis=1, keepdims=False
     )  # Take the max along the axis to stabilize
     lse = max_val + jnp.log(jnp.sum(jnp.exp(s - max_val[:, None]), axis=1))
     p = jnp.exp(s - lse[:, None])
     lse_ref[:] = lse
-    o = pl.dot(p, v)
+    o = dot(p, v)
     o_ref[:, :] = o

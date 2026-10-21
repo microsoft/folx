@@ -17,6 +17,36 @@ def sum_columns(x: jax.Array) -> jax.Array:
     return x.sum(axis=1, keepdims=True)
 
 
+def dot(
+    a: jax.Array, b: jax.Array, trans_a: bool = False, trans_b: bool = False
+) -> jax.Array:
+    """Matrix product of 2D arrays, replacing the removed ``pl.dot``.
+
+    Args:
+        a: Left operand of shape ``(N, K)``, or ``(K, N)`` if ``trans_a``.
+        b: Right operand of shape ``(K, M)``, or ``(M, K)`` if ``trans_b``.
+        trans_a: Whether to transpose ``a`` before the product.
+        trans_b: Whether to transpose ``b`` before the product.
+
+    Returns:
+        Product of shape ``(N, M)``, accumulated in float32 (float64 for
+        float64 inputs, int32 for integer inputs).
+    """
+    dtype = jnp.promote_types(a.dtype, b.dtype)
+    if jnp.issubdtype(dtype, jnp.integer):
+        out_dtype = jnp.int32
+    elif dtype == jnp.float64:
+        out_dtype = jnp.float64
+    else:
+        out_dtype = jnp.float32
+    return jax.lax.dot_general(
+        a,
+        b,
+        dimension_numbers=(((0 if trans_a else 1,), (1 if trans_b else 0,)), ((), ())),
+        preferred_element_type=out_dtype,
+    )
+
+
 def get_value_or_laplacian_block_spec(
     seq_len: int,
     head_len: int,

@@ -11,6 +11,7 @@ from .utils import (
     compiler_params,
     compute_q_and_kv_block_len,
     create_grid,
+    dot,
     get_mask_block_spec,
     get_value_or_laplacian_block_spec,
 )
@@ -126,7 +127,7 @@ def mhsa_kernel(
     q = q_ref[:, :]
     k = k_ref[:, :]
     v = v_ref[:, :]
-    s = jnp.where(square_mask, pl.dot(q, k, trans_b=True), -big_number(q.dtype))
+    s = jnp.where(square_mask, dot(q, k, trans_b=True), -big_number(q.dtype))
     p = jax.nn.softmax(s, axis=1)
-    o = pl.dot(p, v)
+    o = dot(p, v)
     o_ref[:, :] = o

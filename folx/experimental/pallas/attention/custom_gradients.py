@@ -13,6 +13,7 @@ from .utils import (
     compiler_params,
     compute_q_and_kv_block_len,
     create_grid,
+    dot,
     get_lse_block_spec,
     get_mask_block_spec,
     get_value_or_laplacian_block_spec,
@@ -179,31 +180,31 @@ def mhsa_backward_kernel(
     q = jnp.where(mask[:, None], q_ref[:, :], 0.0)
     k = jnp.where(mask[:, None], k_ref[:, :], 0.0)
     v = jnp.where(mask[:, None], v_ref[:, :], 0.0)
-    s = jnp.where(square_mask, pl.dot(q, k, trans_b=True), -big_number(q.dtype))
+    s = jnp.where(square_mask, dot(q, k, trans_b=True), -big_number(q.dtype))
     p = jax.nn.softmax(s)
 
     # Compute the VJPs
     o_vjp = o_vjp_ref[:, :]
 
     # v_vjp
-    v_vjp = pl.dot(p, o_vjp, trans_a=True)
+    v_vjp = dot(p, o_vjp, trans_a=True)
     v_vjp_ref[:, :] = v_vjp
 
     # q_vjp
-    lo_v_p = pl.dot(o_vjp, v, trans_b=True) * p
+    lo_v_p = dot(o_vjp, v, trans_b=True) * p
     ## First term
-    q_vjp = pl.dot(lo_v_p, k)
+    q_vjp = dot(lo_v_p, k)
     ## Second term
-    pk = pl.dot(p, k)
+    pk = dot(p, k)
     q_vjp -= pk * sum_columns(lo_v_p)
     q_vjp_ref[:, :] = q_vjp
 
     # k_vjp
     ## First term
-    k_vjp = pl.dot(lo_v_p.T, q)
+    k_vjp = dot(lo_v_p.T, q)
     ## Second term
-    p_vjp = pl.dot(o_vjp, v, trans_b=True)
-    k_vjp -= pl.dot((p * sum_columns(p_vjp * p)), q, trans_a=True)
+    p_vjp = dot(o_vjp, v, trans_b=True)
+    k_vjp -= dot((p * sum_columns(p_vjp * p)), q, trans_a=True)
     k_vjp_ref[:, :] = k_vjp
 
 
@@ -484,7 +485,7 @@ def mhsea_q_vjp_kernel(
         e = e_ref[:, k_slice]
         lse = lse_ref[:]
 
-        s = jnp.where(square_mask, pl.dot(q, k, trans_b=True) + e, -big_number(q.dtype))
+        s = jnp.where(square_mask, dot(q, k, trans_b=True) + e, -big_number(q.dtype))
 
         p = jnp.exp(s - lse[:, None])
         o = o_ref[:, :]  # caching, because o requires sum over k
@@ -492,11 +493,11 @@ def mhsea_q_vjp_kernel(
         # Compute the VJP
         o_vjp = jnp.where(mask_q[:, None], o_vjp_ref[:, :], 0.0)
 
-        s_vjp = (pl.dot(o_vjp, v, trans_b=True) - sum_columns(o * o_vjp)) * p
+        s_vjp = (dot(o_vjp, v, trans_b=True) - sum_columns(o * o_vjp)) * p
         s_vjp *= square_mask
 
         # Sum over k-axis
-        q_vjp_kblock = pl.dot(s_vjp, k)
+        q_vjp_kblock = dot(s_vjp, k)
         q_vjp += q_vjp_kblock
         e_vjp_ref[:, k_slice] = s_vjp
 
@@ -554,7 +555,7 @@ def mhsea_kv_vjp_kernel(
         e = e_ref[q_slice, :]
         lse = lse_ref[q_slice]
 
-        s = jnp.where(square_mask, pl.dot(q, k, trans_b=True) + e, -big_number(q.dtype))
+        s = jnp.where(square_mask, dot(q, k, trans_b=True) + e, -big_number(q.dtype))
 
         p = jnp.exp(s - lse[:, None])
         o = o_ref[q_slice, :]  # caching, because o requires sum over k
@@ -562,12 +563,12 @@ def mhsea_kv_vjp_kernel(
         # Compute the VJPs
         o_vjp = jnp.where(mask_q[:, None], o_vjp_ref[q_slice, :], 0.0)
 
-        s_vjp = (pl.dot(o_vjp, v, trans_b=True) - sum_columns(o * o_vjp)) * p
+        s_vjp = (dot(o_vjp, v, trans_b=True) - sum_columns(o * o_vjp)) * p
         s_vjp *= square_mask
 
         # These two are summed over the q-axis
-        k_vjp += pl.dot(s_vjp, q, trans_a=True)
-        v_vjp += pl.dot(p, o_vjp, trans_a=True)
+        k_vjp += dot(s_vjp, q, trans_a=True)
+        v_vjp += dot(p, o_vjp, trans_a=True)
 
         return k_vjp, v_vjp
 
