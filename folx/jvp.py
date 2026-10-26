@@ -32,6 +32,7 @@ from .utils import (
     get_jacobian_for_reduction,
     materialize_by_gather,
     np_concatenate_brdcast,
+    pvary_constant,
 )
 
 
@@ -358,11 +359,14 @@ def sparse_index_jvp(
                 ),
                 extra_args,
             )
+            # Indices that went through shard_map's pvary are tracers; use the
+            # constants behind them.
+            concrete_extra = jtu.tree_map(pvary_constant, extra_args)
 
             def _merged_fwd(*args):
                 # For index operations some operands may be static, i.e., they are not
                 # part of the output. We need to make sure that we do not fill these.
-                non_filled_args = merge(args, extra_args)
+                non_filled_args = merge(args, concrete_extra)
                 if index_static_args is None:
                     return fwd_fn(*non_filled_args)
                 static_idx = index_static_args

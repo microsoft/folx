@@ -63,6 +63,41 @@ def compile_time_eval():
         yield
 
 
+# Constants behind traced ``pvary`` outputs, by tracer id. Inside
+# ``jax.shard_map``, JAX inserts ``pvary`` on constants that meet device-varying
+# values. It is a type-only cast that cannot run eagerly, so the interpreter
+# traces it and records the constant here. Index operations then compute their
+# sparsity masks from the constant.
+_PVARY_CONSTANTS: dict[int, tuple] = {}
+_PVARY_SCOPE_DEPTH = 0
+
+
+@contextlib.contextmanager
+def pvary_constants_scope():
+    """Forgets the recorded ``pvary`` constants when the outermost scope exits.
+
+    Nested scopes (sub-jaxprs) keep them, as the enclosing trace may still use them.
+    """
+    global _PVARY_SCOPE_DEPTH
+    _PVARY_SCOPE_DEPTH += 1
+    try:
+        yield
+    finally:
+        _PVARY_SCOPE_DEPTH -= 1
+        if _PVARY_SCOPE_DEPTH == 0:
+            _PVARY_CONSTANTS.clear()
+
+
+def record_pvary_constant(out, value) -> None:
+    _PVARY_CONSTANTS[id(out)] = (out, value)
+
+
+def pvary_constant(x):
+    """Returns the constant behind ``x`` if ``x`` is a traced ``pvary`` of one, else ``x``."""
+    entry = _PVARY_CONSTANTS.get(id(x))
+    return entry[1] if entry is not None and entry[0] is x else x
+
+
 def bound_axis(arr: np.ndarray, axis):
     if isinstance(axis, int):
         axis = (axis,)

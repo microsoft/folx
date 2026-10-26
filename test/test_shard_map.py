@@ -64,3 +64,42 @@ def test_shard_map_multi_device(fn, explicit: bool):
     lapl = jax.vmap(lambda x: jnp.trace(jax.hessian(fn)(x).reshape(x.size, x.size)))(x)
     np.testing.assert_allclose(y.x, jax.vmap(fn)(x), atol=1e-6)
     np.testing.assert_allclose(y.laplacian, lapl, atol=1e-6)
+
+
+@pytest.mark.skipif(
+    Version(jax.__version__) < Version('0.7.1'), reason='jax version too old'
+)
+@pytest.mark.parametrize('n_devices', [1, 2])
+def test_shard_map_sparse_gather_of_constant(n_devices: int, capfd):
+    # Under shard_map, constants that meet device-varying values get a pvary
+    # cast. Gathers with such constant indices must stay sparse instead of
+    # falling back to a dense Jacobian.
+    if len(jax.devices()) < n_devices:
+        pytest.skip(f'needs at least {n_devices} devices')
+    n = 4
+    i, j = np.nonzero(~np.eye(n, dtype=bool))
+    scale = np.linspace(1.0, 2.0, len(i))
+
+    def f(r):
+        return jnp.sum(jnp.asarray(scale)[:, None] * jnp.tanh(r[i] - r[j]))
+
+    def laplacian(sparsity_threshold):
+        @jax.smap(out_axes=0, in_axes=0, axis_name='i')
+        @jax.vmap
+        def test(r):
+            return forward_laplacian(f, sparsity_threshold=sparsity_threshold)(
+                r
+            ).laplacian
+
+        return test
+
+    r = jax.random.normal(jax.random.key(0), (2 * n_devices, n, 3))
+
+    with jax.set_mesh(jax.sharding.Mesh(jax.devices()[:n_devices], 'i')):
+        sparse = laplacian(0.6)(r)
+        dense = laplacian(0)(r)
+
+    # LoggingPrefix replaces the root logger's handlers, so folx's warnings
+    # bypass caplog; read stderr instead.
+    assert 'Could not perform index operation' not in capfd.readouterr().err
+    np.testing.assert_allclose(sparse, dense, rtol=1e-6)
