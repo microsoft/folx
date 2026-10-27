@@ -513,7 +513,11 @@ def sparse_scatter_jvp(
     Returns:
         Tuple of output, output Jacobian and output Laplacian.
     """
-    operand, scatter_indices, updates = merge(laplace_args.arrays, extra_args)  # type: ignore
+    # Indices that went through shard_map's pvary are tracers; use the constants
+    # behind them. The scatter itself still runs on ``extra_args`` through ``fwd``.
+    operand, scatter_indices, updates = merge(
+        laplace_args.arrays, jtu.tree_map(pvary_constant, extra_args)
+    )  # type: ignore
     if isinstance(scatter_indices, (FwdLaplArray, Tracer)):
         return dense_jvp(fwd, laplace_args, in_axes=in_axes)
     # scatter (set) overwrites operand entries; add/min/max keep them varying.

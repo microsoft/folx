@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from packaging.version import Version
 
+import folx.jvp
 from folx import forward_laplacian
 
 
@@ -67,21 +68,29 @@ def test_shard_map_multi_device(fn, explicit: bool):
 
 
 @pytest.mark.skipif(
-    Version(jax.__version__) < Version('0.7.1'), reason='jax version too old'
+    Version(jax.__version__) < Version('0.7.2'), reason='jax version too old'
 )
+@pytest.mark.parametrize('op', ['gather', 'scatter_add'])
 @pytest.mark.parametrize('n_devices', [1, 2])
-def test_shard_map_sparse_gather_of_constant(n_devices: int, capfd):
+def test_shard_map_sparse_index_of_constant(op: str, n_devices: int, monkeypatch):
     # Under shard_map, constants that meet device-varying values get a pvary
-    # cast. Gathers with such constant indices must stay sparse instead of
-    # falling back to a dense Jacobian.
+    # cast. Index operations with such constant indices must stay sparse
+    # instead of falling back to a dense Jacobian.
     if len(jax.devices()) < n_devices:
         pytest.skip(f'needs at least {n_devices} devices')
     n = 4
     i, j = np.nonzero(~np.eye(n, dtype=bool))
     scale = np.linspace(1.0, 2.0, len(i))
+    rows = np.array([0, 2, 2, 1])
 
-    def f(r):
+    def gather(r):
         return jnp.sum(jnp.asarray(scale)[:, None] * jnp.tanh(r[i] - r[j]))
+
+    def scatter_add(r):
+        y = jnp.zeros((3, 3)).at[rows].add(jnp.tanh(r))
+        return jnp.sum(jnp.tanh(y) ** 2)
+
+    f = {'gather': gather, 'scatter_add': scatter_add}[op]
 
     def laplacian(sparsity_threshold):
         @jax.smap(out_axes=0, in_axes=0, axis_name='i')
@@ -93,13 +102,15 @@ def test_shard_map_sparse_gather_of_constant(n_devices: int, capfd):
 
         return test
 
+    def no_dense_jvp(*args, **kwargs):
+        raise AssertionError('sparse mode fell back to a dense Jacobian')
+
     r = jax.random.normal(jax.random.key(0), (2 * n_devices, n, 3))
 
     with jax.set_mesh(jax.sharding.Mesh(jax.devices()[:n_devices], 'i')):
-        sparse = laplacian(0.6)(r)
+        with monkeypatch.context() as m:
+            m.setattr(folx.jvp, 'dense_jvp', no_dense_jvp)
+            sparse = laplacian(0.6)(r)
         dense = laplacian(0)(r)
 
-    # LoggingPrefix replaces the root logger's handlers, so folx's warnings
-    # bypass caplog; read stderr instead.
-    assert 'Could not perform index operation' not in capfd.readouterr().err
     np.testing.assert_allclose(sparse, dense, rtol=1e-6)
