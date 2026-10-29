@@ -33,7 +33,13 @@ from .api import (
     PyTree,
 )
 from .control_flow import scan_laplacian, while_laplacian
-from .utils import LoggingPrefix, compile_time_eval, ravel
+from .utils import (
+    LoggingPrefix,
+    compile_time_eval,
+    pvary_constants_scope,
+    ravel,
+    record_pvary_constant,
+)
 from .wrapped_functions import custom_jvp_laplacian, get_laplacian
 
 R = TypeVar('R', bound=PyTree[Array])
@@ -89,6 +95,7 @@ class JaxExprEnvironment:
         return list(map(self.write, vars, vals))
 
 
+@pvary_constants_scope()
 def eval_jaxpr_with_forward_laplacian(
     jaxpr: Jaxpr, consts, *args, sparsity_threshold: int
 ):
@@ -148,7 +155,18 @@ def eval_jaxpr_with_forward_laplacian(
                 # omnistaging. While this could cost us some memory and speed,
                 # it gives us access to more variables during tracing.
                 # https://github.com/google/jax/pull/3370
-                if all(not isinstance(x, Tracer) for x in invals) and enable_sparsity:
+                if (
+                    eqn.primitive.name == 'pvary'
+                    and enable_sparsity
+                    and all(not isinstance(x, Tracer) for x in invals)
+                ):
+                    # shard_map's type-only cast of a constant cannot run
+                    # eagerly. Trace it and remember the constant.
+                    outvals = eqn.primitive.bind(*subfuns, *invals, **bind_params)
+                    outs = outvals if eqn.primitive.multiple_results else [outvals]
+                    for out, val in zip(outs, invals):
+                        record_pvary_constant(out, val)
+                elif all(not isinstance(x, Tracer) for x in invals) and enable_sparsity:
                     try:
                         with compile_time_eval():
                             outvals = eqn.primitive.bind(

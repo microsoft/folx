@@ -1,4 +1,5 @@
 import contextlib
+import contextvars
 import functools
 import logging
 from typing import Sequence, Type, TypeVar
@@ -61,6 +62,46 @@ def compile_time_eval():
     """
     with jax.ensure_compile_time_eval(), _drop_manual_mesh():
         yield
+
+
+# Constants behind traced ``pvary`` outputs, by tracer id. Inside
+# ``jax.shard_map``, JAX inserts ``pvary`` on constants that meet device-varying
+# values. It is a type-only cast that cannot run eagerly, so the interpreter
+# traces it and records the constant here. Index operations then compute their
+# sparsity masks from the constant. ``None`` outside of a scope.
+_PVARY_CONSTANTS: contextvars.ContextVar[dict[int, tuple] | None] = (
+    contextvars.ContextVar('folx_pvary_constants', default=None)
+)
+
+
+@contextlib.contextmanager
+def pvary_constants_scope():
+    """Records ``pvary`` constants until the outermost scope exits.
+
+    Nested scopes (sub-jaxprs) share the outer table, as the enclosing trace may
+    still use them.
+    """
+    if _PVARY_CONSTANTS.get() is not None:
+        yield
+        return
+    token = _PVARY_CONSTANTS.set({})
+    try:
+        yield
+    finally:
+        _PVARY_CONSTANTS.reset(token)
+
+
+def record_pvary_constant(out, value) -> None:
+    table = _PVARY_CONSTANTS.get()
+    if table is not None:
+        table[id(out)] = (out, value)
+
+
+def pvary_constant(x):
+    """Returns the constant behind ``x`` if ``x`` is a traced ``pvary`` of one, else ``x``."""
+    table = _PVARY_CONSTANTS.get()
+    entry = None if table is None else table.get(id(x))
+    return entry[1] if entry is not None and entry[0] is x else x
 
 
 def bound_axis(arr: np.ndarray, axis):
