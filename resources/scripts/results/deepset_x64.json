@@ -1,0 +1,115 @@
+{
+  "config": {
+    "n_layers_phi": 4,
+    "n_layers_rho": 2,
+    "width": 256,
+    "batch": 512,
+    "sparsity_threshold": 3,
+    "chunk_sizes": {
+      "4": 512,
+      "8": 256,
+      "16": 128,
+      "32": 64,
+      "64": 16,
+      "128": 8
+    },
+    "dtype": "float64"
+  },
+  "system": {
+    "device": "NVIDIA GeForce RTX 5070 Ti",
+    "platform": "gpu",
+    "jax": "0.10.1",
+    "folx": "0.2.31",
+    "python": "3.14.3",
+    "x64": true
+  },
+  "results": {
+    "4": {
+      "hessian_loop": {
+        "compile": 6.123028728999998,
+        "first_call": 0.041468833999942945,
+        "run": 0.03295006099995135,
+        "run_std": 0.00027345205082565785,
+        "n_runs": 16,
+        "memory": 87231424,
+        "max_rel_error": 0.0
+      },
+      "folx_dense_chunked": {
+        "compile": 8.375075774999914,
+        "first_call": 0.018975032000071224,
+        "run": 0.017501155499985543,
+        "run_std": 0.0005207045178976594,
+        "n_runs": 30,
+        "memory": 121738536,
+        "max_rel_error": 2.678371321106928e-13
+      },
+      "folx_sparse_chunked": {
+        "compile": 5.701255838999941,
+        "first_call": 0.010138228999949206,
+        "run": 0.007838381500050673,
+        "run_std": 4.551884400921712e-05,
+        "n_runs": 50,
+        "memory": 42046496,
+        "max_rel_error": 1.7587711739723964e-13
+      }
+    },
+    "8": {
+      "hessian_loop": {
+        "compile": 2.9553010919998997,
+        "first_call": 0.12127148700005819,
+        "run": 0.11771571700001005,
+        "run_std": 0.0003186350485931184,
+        "n_runs": 5,
+        "memory": 171317440,
+        "max_rel_error": 0.0
+      },
+      "folx_dense_chunked": {
+        "compile": 8.050454318999982,
+        "first_call": 0.06332891800002471,
+        "run": 0.05974748199992064,
+        "run_std": 0.0005484468656035827,
+        "n_runs": 9,
+        "memory": 222500400,
+        "max_rel_error": 1.5166660289635433e-12
+      },
+      "folx_sparse_chunked": {
+        "compile": 1.467671289000009,
+        "first_call": 0.01908498500006317,
+        "run": 0.01443913999992219,
+        "run_std": 0.000238796906839707,
+        "n_runs": 35,
+        "memory": 42145072,
+        "max_rel_error": 1.9123180365192503e-12
+      }
+    },
+    "16": {
+      "hessian_loop": {
+        "compile": 3.1319049500000347,
+        "first_call": 0.4526625310002146,
+        "run": 0.44910312399997565,
+        "run_std": 0.0008254518943653315,
+        "n_runs": 5,
+        "memory": 339496640,
+        "max_rel_error": 0.0
+      },
+      "folx_dense_chunked": {
+        "compile": 8.895076288999917,
+        "first_call": 0.22272311100005027,
+        "run": 0.21985608800014234,
+        "run_std": 0.0008627007860475387,
+        "n_runs": 5,
+        "memory": 424023856,
+        "max_rel_error": 1.883280549044079e-12
+      },
+      "folx_sparse_chunked": {
+        "compile": 1.2044070990000364,
+        "first_call": 0.03175003299998025,
+        "run": 0.027595457999950668,
+        "run_std": 0.0004078094329087456,
+        "n_runs": 19,
+        "memory": 42341936,
+        "max_rel_error": 1.7164075890021983e-12
+      }
+    }
+  }
+}

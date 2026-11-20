@@ -1,0 +1,232 @@
+{
+  "config": {
+    "n_layers": 4,
+    "width_one": 256,
+    "width_two": 32,
+    "batch": 512,
+    "sparsity_threshold": 6,
+    "chunk_sizes": {
+      "4": 512,
+      "8": 256,
+      "16": 128,
+      "32": 64,
+      "64": 16,
+      "128": 8
+    },
+    "dtype": "float32"
+  },
+  "system": {
+    "device": "NVIDIA GeForce RTX 5070 Ti",
+    "platform": "gpu",
+    "jax": "0.10.1",
+    "folx": "0.2.31",
+    "python": "3.14.3",
+    "x64": false
+  },
+  "results": {
+    "4": {
+      "folx_sparse_chunked": {
+        "compile": 9.442170885999076,
+        "first_call": 0.03641136899932462,
+        "run": 0.002672518499821308,
+        "run_std": 0.00027989759263237924,
+        "n_runs": 50,
+        "memory": 179559760,
+        "max_rel_error": 0.0
+      },
+      "folx_dense_chunked": {
+        "compile": 1.5628141010001855,
+        "first_call": 0.007608328998685465,
+        "run": 0.0028468415011957404,
+        "run_std": 0.0004872033386304027,
+        "n_runs": 50,
+        "memory": 187817256,
+        "max_rel_error": 1.4798555412198766e-06
+      },
+      "hessian_loop": {
+        "compile": 5.750350480000634,
+        "first_call": 0.012233464000019012,
+        "run": 0.004661216999920725,
+        "run_std": 0.00016126495883255602,
+        "n_runs": 50,
+        "memory": 78708720,
+        "max_rel_error": 0.0
+      },
+      "folx_sparse": {
+        "compile": 9.56247169100061,
+        "first_call": 0.03697812499922293,
+        "run": 0.002828772499015031,
+        "run_std": 0.00039795941525018507,
+        "n_runs": 50,
+        "memory": 179559760,
+        "max_rel_error": 0.6643553376197815
+      }
+    },
+    "8": {
+      "folx_sparse_chunked": {
+        "compile": 10.754999876000511,
+        "first_call": 0.02029057300023851,
+        "run": 0.010529810999287292,
+        "run_std": 0.00035432297458411503,
+        "n_runs": 48,
+        "memory": 356426320,
+        "max_rel_error": 0.0
+      },
+      "folx_dense_chunked": {
+        "compile": 1.7519998610005132,
+        "first_call": 0.016847026001414633,
+        "run": 0.011442048500612145,
+        "run_std": 0.00039948710048240903,
+        "n_runs": 44,
+        "memory": 393978168,
+        "max_rel_error": 1.274136138817994e-05
+      },
+      "hessian_loop": {
+        "compile": 7.945018178999817,
+        "first_call": 0.05132037399926048,
+        "run": 0.022941401500247594,
+        "run_std": 0.00047242745284680935,
+        "n_runs": 22,
+        "memory": 203615664,
+        "max_rel_error": 0.0
+      },
+      "folx_sparse": {
+        "compile": 10.451010423999833,
+        "first_call": 0.018739390001428546,
+        "run": 0.01127791999897454,
+        "run_std": 0.00041170417459847195,
+        "n_runs": 45,
+        "memory": 712745296,
+        "max_rel_error": 0.1298658698797226
+      }
+    },
+    "16": {
+      "folx_sparse_chunked": {
+        "compile": 11.30270791699877,
+        "first_call": 0.04928026599918667,
+        "run": 0.041670665001220186,
+        "run_std": 0.0004016108807460508,
+        "n_runs": 13,
+        "memory": 677191504,
+        "max_rel_error": 0.0
+      },
+      "folx_dense_chunked": {
+        "compile": 3.307893649998732,
+        "first_call": 0.1030337239990331,
+        "run": 0.05859274899921729,
+        "run_std": 0.0030129086193278094,
+        "n_runs": 9,
+        "memory": 892970800,
+        "max_rel_error": 4.270077988621779e-05
+      },
+      "hessian_loop": {
+        "compile": 8.952998922000916,
+        "first_call": 0.12469355800021731,
+        "run": 0.10770561499884934,
+        "run_std": 0.0016798352812982624,
+        "n_runs": 5,
+        "memory": 506906800,
+        "max_rel_error": 0.0
+      },
+      "folx_sparse": {
+        "compile": 10.763778656000795,
+        "first_call": 0.05807918400023482,
+        "run": 0.04291733300033229,
+        "run_std": 0.0004464746216449017,
+        "n_runs": 12,
+        "memory": 2798329680,
+        "max_rel_error": 0.939100980758667
+      }
+    },
+    "32": {
+      "folx_sparse_chunked": {
+        "compile": 11.717784455000583,
+        "first_call": 0.1819968700001482,
+        "run": 0.16921122500025376,
+        "run_std": 0.0027025571153885676,
+        "n_runs": 5,
+        "memory": 1515594832,
+        "max_rel_error": 0.0
+      },
+      "folx_dense_chunked": {
+        "compile": 5.240216636000696,
+        "first_call": 0.34269198600122763,
+        "run": 0.3051495559993782,
+        "run_std": 0.0003155814729808962,
+        "n_runs": 5,
+        "memory": 2905484080,
+        "max_rel_error": 9.16810313356109e-05
+      },
+      "hessian_loop": {
+        "compile": 9.129954068001098,
+        "first_call": 0.7801619000001665,
+        "run": 0.7467359329984902,
+        "run_std": 0.005968275179119378,
+        "n_runs": 5,
+        "memory": 1654581168,
+        "max_rel_error": 0.0
+      },
+      "folx_sparse": {
+        "compile": 17.092801827000585,
+        "first_call": 0.22874031199899036,
+        "run": 0.21651075299996592,
+        "run_std": 0.0006153505965626531,
+        "n_runs": 5,
+        "memory": 12333753672,
+        "max_rel_error": 0.44896048307418823
+      }
+    },
+    "64": {
+      "folx_sparse_chunked": {
+        "compile": 12.980018514999756,
+        "first_call": 0.8020179659997666,
+        "run": 0.7690738080000301,
+        "run_std": 0.027774109474895788,
+        "n_runs": 5,
+        "memory": 1433524808,
+        "max_rel_error": 0.0
+      },
+      "folx_dense_chunked": {
+        "compile": 12.305869779000204,
+        "first_call": 2.5775286719999713,
+        "run": 2.6392058130004443,
+        "run_std": 0.09675977103984626,
+        "n_runs": 5,
+        "memory": 6762605872,
+        "max_rel_error": 0.005733655299991369
+      },
+      "hessian_loop": {
+        "compile": 9.853290582999762,
+        "first_call": 5.160835519000102,
+        "run": 5.153543539001475,
+        "run_std": 0.0038583290005336133,
+        "n_runs": 5,
+        "memory": 6360526512,
+        "max_rel_error": 0.0
+      },
+      "folx_sparse": {
+        "error": "RESOURCE_EXHAUSTED: Failed to get configs for: 2 out of 10 instructions. See logs for all failures. Example failure: \nAutotuning failed for HLO: %gemm_fusion_dot.4 = f32[6324224,256]{1,0} fusion(%bitcast.871, %constant.743), kind=kCustom, calls=%gemm_fusion_dot.4_computation, metadata={op_name=\"jit(lap)/vmap(jit(wrapped))/vmap()/dot_general\" stack_frame_id=588}, backend_config={\"operation_queue_id\":\"0\",\"fusion_backend_config\":{\"kind\":\"__triton_gemm\"},\"force_earliest_schedule\":false,\"reification_"
+      }
+    },
+    "128": {
+      "folx_sparse_chunked": {
+        "compile": 18.272384597999917,
+        "first_call": 3.580297905000407,
+        "run": 3.3596798599992326,
+        "run_std": 0.020714789224970824,
+        "n_runs": 5,
+        "memory": 3487477576,
+        "max_rel_error": 0.0
+      },
+      "folx_dense_chunked": {
+        "error": "INTERNAL: Autotuning failed for HLO: %gemm_fusion_dot.27 = f32[50593792,32]{1,0} fusion(%bitcast.29, %bitcast.31, %constant.155), kind=kCustom, calls=%gemm_fusion_dot.27_computation, metadata={op_name=\"jit(lap)/while/body/closed_call/vmap(jit(wrapped))/dot_general\" stack_frame_id=376}, backend_config={\"operation_queue_id\":\"0\",\"fusion_backend_config\":{\"kind\":\"__triton_gemm\"},\"force_earliest_schedule\":false,\"reification_cost\":[],\"device_type\":\"DEVICE_TYPE_INVALID\"}. Failed to pick best config: All"
+      },
+      "hessian_loop": {
+        "error": "RESOURCE_EXHAUSTED: Out of memory while trying to allocate 26.16GiB. [executable_name='jit_laplacian'] [tf-allocator-allocation-error='']"
+      },
+      "folx_sparse": {
+        "error": "RESOURCE_EXHAUSTED: Failed to get configs for: 5 out of 11 instructions. See logs for all failures. Example failure: \nAutotuning failed for HLO: %gemm_fusion_dot.9 = f32[58720256,32]{1,0} fusion(%concatenate.215, %constant.806), kind=kCustom, calls=%gemm_fusion_dot.9_computation, metadata={op_name=\"jit(lap)/vmap(jit(wrapped))/vmap()/dot_general\" stack_frame_id=584}, backend_config={\"operation_queue_id\":\"0\",\"fusion_backend_config\":{\"kind\":\"__triton_gemm\"},\"force_earliest_schedule\":false,\"reificat"
+      }
+    }
+  }
+}

@@ -165,3 +165,6 @@ notebooks/
 .vscode/
 .claude_scratch/
 benchmarks/
+
+jats/
+*.pdf

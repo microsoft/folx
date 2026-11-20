@@ -1,0 +1,159 @@
+{
+  "config": {
+    "n_layers": 4,
+    "width_one": 256,
+    "width_two": 32,
+    "batch": 16,
+    "sparsity_threshold": 6,
+    "dtype": "float64"
+  },
+  "system": {
+    "device": "NVIDIA GeForce RTX 5070 Ti",
+    "platform": "gpu",
+    "jax": "0.10.1",
+    "folx": "0.2.31",
+    "python": "3.14.3",
+    "x64": true
+  },
+  "results": {
+    "4": {
+      "hessian_loop": {
+        "compile": 8.725735978999865,
+        "first_call": 0.03172892399993543,
+        "run": 0.0047746639999104445,
+        "run_std": 0.0010024530243003614,
+        "n_runs": 50,
+        "memory": 5153264,
+        "max_rel_error": 0.0
+      },
+      "folx_dense": {
+        "compile": 10.065254406999884,
+        "first_call": 0.025844412999958877,
+        "run": 0.0027575449998948898,
+        "run_std": 0.00010703062524154036,
+        "n_runs": 50,
+        "memory": 13803432,
+        "max_rel_error": 1.5435200693158121e-13
+      },
+      "folx_sparse": {
+        "compile": 5.893338145000143,
+        "first_call": 0.013161126999875705,
+        "run": 0.002590717999964909,
+        "run_std": 0.0001844054265223729,
+        "n_runs": 50,
+        "memory": 15611600,
+        "max_rel_error": 1.5435200693158121e-13
+      }
+    },
+    "8": {
+      "hessian_loop": {
+        "compile": 7.817836194000165,
+        "first_call": 0.07470655700012685,
+        "run": 0.019074416999956156,
+        "run_std": 0.005588053013242223,
+        "n_runs": 23,
+        "memory": 12722864,
+        "max_rel_error": 0.0
+      },
+      "folx_dense": {
+        "compile": 9.332899737999924,
+        "first_call": 0.018708586999991894,
+        "run": 0.006934453499980009,
+        "run_std": 0.00018380115727397516,
+        "n_runs": 50,
+        "memory": 49245360,
+        "max_rel_error": 1.206476489437242e-12
+      },
+      "folx_sparse": {
+        "compile": 6.646580811999911,
+        "first_call": 0.013374451999879966,
+        "run": 0.00716952250002123,
+        "run_std": 0.00017529816485108374,
+        "n_runs": 50,
+        "memory": 43781840,
+        "max_rel_error": 1.1086064970055077e-12
+      }
+    },
+    "16": {
+      "hessian_loop": {
+        "compile": 9.37631503800003,
+        "first_call": 0.07598671000005197,
+        "run": 0.061910334000003786,
+        "run_std": 0.0009003041618904793,
+        "n_runs": 9,
+        "memory": 33479088,
+        "max_rel_error": 0.0
+      },
+      "folx_dense": {
+        "compile": 12.02229756099996,
+        "first_call": 0.037254159999974945,
+        "run": 0.02668046899998444,
+        "run_std": 0.0011353418612472493,
+        "n_runs": 19,
+        "memory": 223318184,
+        "max_rel_error": 1.6819243407397268e-13
+      },
+      "folx_sparse": {
+        "compile": 6.921677423999881,
+        "first_call": 0.03252311300002475,
+        "run": 0.025462330499976815,
+        "run_std": 0.0003165514160287445,
+        "n_runs": 20,
+        "memory": 166153168,
+        "max_rel_error": 1.6798453242493193e-13
+      }
+    },
+    "32": {
+      "hessian_loop": {
+        "compile": 10.59239007999986,
+        "first_call": 0.2720632129999103,
+        "run": 0.25760042899992186,
+        "run_std": 0.00050149502058728,
+        "n_runs": 5,
+        "memory": 107288240,
+        "max_rel_error": 0.0
+      },
+      "folx_dense": {
+        "compile": 13.120968206000043,
+        "first_call": 0.14555471199992098,
+        "run": 0.12045372099987617,
+        "run_std": 0.001390178589385732,
+        "n_runs": 5,
+        "memory": 1401979056,
+        "max_rel_error": 9.44867630333399e-13
+      },
+      "folx_sparse": {
+        "compile": 7.228778273999978,
+        "first_call": 0.11734992100014097,
+        "run": 0.10246751800013953,
+        "run_std": 0.0036652729087137672,
+        "n_runs": 5,
+        "memory": 780304848,
+        "max_rel_error": 2.8938594629415125e-12
+      }
+    },
+    "64": {
+      "hessian_loop": {
+        "compile": 12.57960221999997,
+        "first_call": 1.3995404590000362,
+        "run": 1.275469006999856,
+        "run_std": 0.006738628012769889,
+        "n_runs": 5,
+        "memory": 399982000,
+        "max_rel_error": 0.0
+      },
+      "folx_dense": {
+        "error": "RESOURCE_EXHAUSTED: Out of memory while trying to allocate 9.68GiB. [executable_name='jit_lap'] [tf-allocator-allocation-error='']"
+      },
+      "folx_sparse": {
+        "compile": 8.712896110000202,
+        "first_call": 0.48847324000007575,
+        "run": 0.46498501399992165,
+        "run_std": 0.0006588293695123628,
+        "n_runs": 5,
+        "memory": 2866012352,
+        "max_rel_error": 2.217966932198038e-12
+      }
+    }
+  }
+}
